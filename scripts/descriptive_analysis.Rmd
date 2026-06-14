@@ -11,6 +11,14 @@ output:
     theme: flatly
 ---
 
+> **A note on the backbone.** All the statistics in this analysis describe the
+> distributed network, which is a *pruned backbone* of the full product space
+> (a maximum spanning tree plus the links with $\varphi > 0.55$), not the complete
+> proximity matrix. Weak proximity links were removed by construction, so measures
+> such as density, degree, clustering, and distances refer to this strong-link
+> backbone only. We keep this in mind when interpreting the results, and we note it
+> explicitly where it matters.
+
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
 library(igraph)
@@ -18,20 +26,26 @@ library(here)
 library(tidyverse)
 ```
 
-# **Data Loading**
+# **1. Data Loading**
 
 ```{r load-graph}
-g <- readRDS(here("data", "processed", "product_space.rds"))
+g = readRDS(here("data", "processed", "product_space.rds"))
 layout_xy <- readRDS(here("data", "processed", "layout_xy.rds"))
 summary(g)
 ```
 
-# **Exploratory Data Analysis**
+# **2. Exploratory Data Analysis**
+
+This notebook performs the descriptive analysis of the Product Space (HS) network.
+It loads the cleaned graph produced in the construction notebook and explores its
+basic properties: data quality, size, connectivity, degree, clustering, and
+centrality. We first check what the vertices and edges represent, whether we observe the full
+system or only a part, and whether there is sampling or missing data.
 
 ```{r view-tables}
-# A graph stores two tables underneath: one for nodes, one for edges.
-# We extract them and convert to tibbles for clean printing and later use.
-# Note: igraph:: prefix is needed because dplyr masks as_data_frame().
+# A graph stores two tables: one for nodes, one for edges;
+# We extract them and convert to tibbles for clean printing and later use
+# NB: igraph:: prefix is needed because dplyr masks as_data_frame()
 
 nodes_tbl <- igraph::as_data_frame(g, what = "vertices") |> as_tibble()
 edges_tbl <- igraph::as_data_frame(g, what = "edges")    |> as_tibble()
@@ -43,7 +57,19 @@ nodes_tbl |> select(name, pid, product, community_ref, size_layout) |> head(10)
 edges_tbl |> head(10)
 ```
 
-## **Data Quality Check**
+ The edge table shows two numeric columns,
+`width_layout` and `weight`, with the same values. This is on purpose. The
+original value is the line *thickness* used to draw the network in the Atlas
+visualization. According to the dataset documentation this thickness is
+non-linear and meant for layout only, so it is **not** the true proximity score
+$\varphi$ and should not be read as a real edge weight. We keep it under two names
+for two reasons: `width_layout` records what the value really is (a drawing
+thickness), while `weight` is the name that igraph looks for when running weighted
+computations. Our main analyses treat the network as **unweighted**; we use the
+weight only later, as a robustness check, to confirm that results do not depend on
+this layout-only value.
+
+## **2.1 Data Quality Check**
 
 ```{r}
 # Missing values in the node and edge tables
@@ -56,46 +82,158 @@ any(which_multiple(g))
 # Self-loops
 any(which_loop(g))
 
-# 4. Isolated nodes
+# Isolated nodes
 sum(degree(g) == 0)
 ```
 
-The dataset is clean at the source: there are no missing values
-in either the node or edge tables, no duplicated edges, no self-loops, and no
-isolated products. No additional cleaning is therefore required before analysis.
-This also answers the *missingness* question from Stage 1: there is no accidental
-missing data, the only data reduction is the deliberate backbone thinning
-(maximum spanning tree + $\varphi > 0.55$), which removes weak proximity
-links by design rather than by error.
+The dataset is clean at the source: there are no missing values in either the node
+or edge tables, no duplicated edges, no self-loops, and no isolated products. No
+additional cleaning is needed before analysis. This also answers the *missingness*
+question from Stage 1: there is no accidental missing data. The only reduction is
+the backbone construction (maximum spanning tree + $\varphi > 0.55$), which removes
+weak links on purpose, not by mistake.
 
-## **Network Size and Connectivity**
+## **2.2 Network Size and Connectivity**
 
-
-```{r}
-# Number of nodes (products) and edges (proximity links)
+```{r network-size}
+# Nodes and edges
 vcount(g)
 ecount(g)
 
-# Density: fraction of possible edges that actually exist.
+# Density: fraction of possible edges that actually exist
 edge_density(g)
 
 # Number of connected components
 components(g)$no
 
-# Diameter: the longest shortest path in the network.
-# weights = NA forces the UNWEIGHTED version (count steps, not edge widths)
-# our primary analysis, given the layout-only weight.
+# Diameter: the longest shortest path.
+# weights = NA forces the unweighted version (count steps, not edge widths),
+# our primary analysis given the layout-only weight.
 diameter(g, weights = NA)
 
-# Average shortest-path distance between any two products
+# Average shortest-path distance between two products
 mean_distance(g, weights = NA)
 ```
 
-**Network size and connectivity.** The network has 866 products and 2,532
-proximity links. Its density is very low ($\approx 0.0068$): only about 0.7% of all
-possible edges are present, as expected for a pruned backbone. Despite being
+The network has 866 products and 2,532
+proximity links. Its density is very low ($\approx 0.0068$): only about 0.7% of
+all possible edges are present, as expected for a pruned backbone. Despite being
 sparse, the network forms a **single connected component**, so every product is
 reachable from every other.
 
-The **diameter is 21** (the longest shortest path) and the **average distance is $\approx 7.1$** steps between two products. These values are fairly large for a network of this size, which suggests the products are not all tightly packed together but
-spread out across the network. We will look at this structure more closely with centrality and community detection.
+The **diameter is 21** (the longest shortest path) and the **average distance is $\approx 7.1$** steps between two products. 
+We will interpret these values together with the degree and centrality results 
+in the next sections, rather than drawing conclusions now.
+
+## **2.3 Degree**
+
+```{r degree}
+deg = degree(g)
+summary(deg) # it shows a numerical summary of the degree distribution
+
+# Top 10 most connected products
+nodes_tbl|>
+  mutate(degree = deg)|>
+  arrange(desc(degree))|>
+  select(product, community_ref, degree)|>
+  head(10)
+```
+
+The degree of a product is the number of other products it is directly
+connected to. The summary shows a clear imbalance: the median degree is only 2,
+so half of the products have two connections or fewer, while the mean is higher
+(about 5.8) and the maximum reaches 48. When the mean is well above the median,
+the distribution is skewed to the right: most products have few links, but a small
+number act as highly connected hubs.
+
+The ten most connected products are mostly basic manufacturing goods (forged steel
+balls, transmission shafts, cast iron articles, bricks, wooden cases, rock wool),
+plus T-shirts. We will examine the shape of this degree distribution more closely
+in the next step, and return to the role of these hubs and their communities later.
+
+### **2.3.1 Degree Distribution**
+
+```{r degree-histogram}
+deg_tbl = tibble(degree = deg)
+
+ggplot(deg_tbl, aes(x = degree)) +
+  geom_histogram(binwidth = 1, fill = "steelblue", color = "white") +
+  labs(title = "Degree distribution",
+       x = "Degree", y = "Number of products") +
+  theme_minimal() +
+  theme(panel.grid.minor = element_blank())
+```
+
+The histogram confirms the imbalance seen in the summary.
+The large majority of products have a very low degree, with a tall peak at degree 1
+(about 285 products) that drops off quickly. To the right there is a long, thin
+tail of products with much higher degree, up to the single product with degree 48.
+This long-tailed shape, with many low-degree nodes and few high-degree hubs, is
+typical of many real-world networks. We look at it on a log-log scale next to see
+its shape more clearly.
+
+### **2.3.2 Degree Distribution on a log-log scale**
+
+```{r degree-loglog}
+# Frequency of each degree value
+deg_dist = as.data.frame(table(deg)) |>
+  rename(degree = deg, freq = Freq) |>
+  mutate(degree = as.numeric(as.character(degree)))
+
+# Log-log plot: log frequency vs log degree
+ggplot(deg_dist, aes(x = log(degree), y = log(freq))) +
+  geom_point(color = "darkblue") +
+  labs(title = "Degree distribution (log-log scale)",
+       x = "log(Degree)", y = "log(Frequency)") +
+  theme_minimal() +
+  theme(panel.grid.minor = element_blank())
+```
+
+The histogram shows a heavy tail, but
+not its precise shape. The log-log plot helps with this. If the degree
+distribution follows a power law, $P(k) \propto k^{-\alpha}$, then taking logs of
+both sides gives a straight line:
+
+$\log P(k) = c - \alpha \, \log k$
+
+so a power law appears as a descending straight line on a log-log scale, with
+slope $-\alpha$.
+
+In our plot the points do fall roughly along a descending line, which is
+consistent with a power-law (or *scale-free*) degree distribution. The fit is
+cleaner on the left (low degrees), where each degree value is shared by many
+products, and noisier on the right (high degrees), where only a few products takeeach value and the frequencies are estimated less reliably. We will return to
+whether a power-law mechanism such as preferential attachment can explain this
+shape when we compare the network to generative models.
+
+### **2.3.3 Fitting the Degree Distribution**
+
+The log-log plot suggests a roughly straight, descending line. To describe this
+more precisely, we fit a linear model to the log-frequency against the log-degree.
+This gives a numerical estimate of the slope, which corresponds to the power-law
+exponent $-\alpha$, and an $R^2$ value telling us how well a straight line
+describes the points.
+
+This is a **descriptive** fit of the observed shape, not a test of any generative
+model: we are measuring the slope of the line we already see, not yet asking which
+mechanism produced it. We return to generative mechanisms such as preferential
+attachment in the modelling part of the project.
+
+```{r degree-fit}
+fit = lm(log(freq) ~ log(degree), data = deg_dist)
+summary(fit)
+```
+
+The linear fit on the log-log scale gives a
+slope of about $-1.40$ for `log(degree)`, with a very small p-value, so the
+descending relationship is clear and well estimated. Following the power-law form
+$\log P(k) = c - \alpha \log k$, this slope corresponds to an exponent
+$\alpha \approx 1.40$.
+
+This value is somewhat lower than the range often reported for scale-free networks
+(usually between 2 and 3). We note this only as a description of the observed
+shape, as mentioned above, our network is a pruned backbone, which affects the
+tail, and we leave conclusions about the underlying mechanism to the modelling
+part, where we compare the network to generative models.
+
+## **Clustering**
