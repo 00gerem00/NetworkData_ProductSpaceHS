@@ -194,7 +194,9 @@ not its precise shape. The log-log plot helps with this. If the degree
 distribution follows a power law, $P(k) \propto k^{-\alpha}$, then taking logs of
 both sides gives a straight line:
 
-$\log P(k) = c - \alpha \, \log k$
+$$
+\log P(k) = c - \alpha \, \log k,
+$$
 
 so a power law appears as a descending straight line on a log-log scale, with
 slope $-\alpha$.
@@ -236,4 +238,144 @@ shape, as mentioned above, our network is a pruned backbone, which affects the
 tail, and we leave conclusions about the underlying mechanism to the modelling
 part, where we compare the network to generative models.
 
-## **Clustering**
+## **2.4 Clustering and Transitivity**
+
+After looking at the degree of each product, we ask whether
+the neighbours of a product are also connected to each other, i.e. whether the
+network forms *triangles*.
+
+For a vertex $v$, let $\tau_\triangle(v)$ be the number of triangles involving $v$,
+and $\tau_3(v) = \binom{d_v}{2}$ the number of connected triples (wedges) centred
+on $v$. The **local clustering coefficient** is
+
+$$
+cl(v) = \frac{\tau_\triangle(v)}{\tau_3(v)},
+$$
+
+defined for vertices with degree at least 2. It measures, among the pairs of
+neighbours of $v$, how many are actually connected.
+
+These local values can be aggregated to the whole network in two ways:
+
+$$
+cl(G) = \frac{1}{|V'|}\sum_{v \in V'} cl(v); 
+\qquad cl_T(G) = \frac{\sum_{v \in V'}\tau_\triangle(v)}{\sum_{v \in V'}\tau_3(v)}.
+$$
+
+The first is a simple average of the local coefficients; the second, the
+**transitivity**, is a weighted average. Following Bollobás and Riordan, we use the
+transitivity $cl_T(G)$ as our main measure, since the weighting makes it less
+sensitive to low-degree vertices. Values close to 1 indicate a highly clustered
+network; values close to 0 indicate few triangles.
+
+```{r clustering}
+# Transitivity: cl_T(G)
+transitivity(g, type = "global")
+
+# Clustering Coefficient: cl(G)
+transitivity(g, type = "average")
+```
+
+The transitivity is $cl_T(G) \approx 0.43$ and the
+simple clustering coefficient is $cl(G) \approx 0.28$. Both are moderate-to-high
+values, showing that the network forms a fair number of triangles: the neighbours
+of a product are often connected to each other. This points to the presence of
+dense groups of products, an early sign of community structure that we examine
+later. The value is notable given that we work with a pruned backbone, where
+removing weak links also removes potential triangles.
+
+The two measures also differ ($cl_T(G) > cl(G)$). In the transitivity, each vertex
+$v$ is weighted by $\tau_3(v) = \binom{d_v}{2}$, the number of connected triples
+centred on it. Since this grows quickly with degree, hubs receive much larger
+weights than peripheral nodes. The fact that the weighted measure is higher than
+the simple average therefore suggests that the more connected products (the hubs)
+tend to be more clustered than the peripheral ones: their neighbours are also
+often linked to one another.
+
+Overall, the network shows a clear tendency to form triangles, and this clustering
+is concentrated around the hubs. Together with the heavy-tailed degree
+distribution seen earlier, this gives a first, consistent picture: a few highly
+connected, densely interconnected products alongside many peripheral ones. We test
+whether this translates into well-defined communities in the modelling part.
+
+## **2.5 Centrality**
+
+The degree section asked *how many* links a product has. We now ask a broader
+question: **how important is a product in the network?** This is the idea of
+*centrality*. The difficulty is that there is no single definition of importance.
+Rather than pick one measure and call it "the" importance, we compute several
+measures, each built on a different idea of what makes a vertex important, and
+compare them. Where they agree, the picture is robust; where they disagree, the
+difference itself is informative.
+
+We use four measures:
+
+- **Degree centrality** counts direct neighbours. A product is important if it is
+  connected to many others. We already computed this in Section 2.3, so here we use
+  it only as a baseline for comparison.
+- **Closeness centrality** is based on *distance*. A product is important if it is
+  close, on average, to all other products through short paths.
+- **Betweenness centrality** is based on *flow*. A product is important if it lies
+  on many shortest paths between other products, acting as a bridge.
+- **Eigenvector centrality** is based on *feedback*. A product is important if it is
+  connected to other important products.
+
+Each captures a different role: many connections (degree), short reach (closeness),
+bridging position (betweenness), and connection to influential neighbours
+(eigenvector).
+
+### Mathematical formulation
+
+For a vertex $v \in V$:
+
+**Closeness centrality** is the inverse of the total distance from $v$ to all
+other vertices,
+
+$$
+c_{Cl}(v) = \frac{1}{\sum_{u \in V} \mathrm{dist}(v, u)},
+$$
+
+where $\mathrm{dist}(v, u)$ is the shortest-path distance between $u$ and $v$. A
+small total distance gives a large closeness. Note that $c_{Cl}(v)$ is only
+well-defined when the graph is connected; otherwise distances to unreachable
+vertices are infinite and the measure collapses to zero. Our network is a single
+connected component, so this is not a problem here.
+
+**Betweenness centrality** counts how often $v$ sits on shortest paths between
+other vertices,
+
+$$
+c_B(v) = \sum_{s \neq t \neq v \in V} \frac{\sigma(s, t \mid v)}{\sigma(s, t)},
+$$
+
+where $\sigma(s, t)$ is the number of shortest paths between $s$ and $t$, and
+$\sigma(s, t \mid v)$ is the number of those paths that pass through $v$. A product
+with high betweenness connects parts of the network that would otherwise be far
+apart.
+
+**Eigenvector centrality** (Bonacich) defines importance recursively: the
+importance of $v$ is proportional to the sum of the importances of its neighbours,
+
+$$
+c_{Ei}(u) = \alpha \sum_{\{u, v\}} c_{Ei}(v),
+$$
+
+which in matrix form is the eigenvector problem for the adjacency matrix $A$,
+
+$$
+A\,\vec{c}_{Ei} = \alpha^{-1}\,\vec{c}_{Ei}.
+$$
+
+The centrality vector is the leading eigenvector of $A$. For an undirected,
+connected graph this eigenvector has all entries of the same sign; we report them
+in absolute value, scaled to $(0, 1]$.
+
+All these measures are computed on the pruned backbone, since they depend on the
+shortest paths within it. Given what we already know about the network, we expect
+the high-degree hubs from Section 2.3 to also score high on the other measures,
+since a product with many links tends to be both close to others and connected to
+important neighbours. The interesting cases will be products that rank high on one
+measure but not on others, especially betweenness: a product can sit on many
+shortest paths without having a high degree, if it bridges two otherwise separated
+groups. We do not assume this happens; we check it.
+
