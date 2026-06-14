@@ -1,0 +1,268 @@
+---
+title: "The Product Space (HS): Dataset Construction"
+subtitle: "Statistical and Computational Methods for Network Data"
+author: "Matteo Gerevini, Beatrice Liuni, Lorenzo Meroni"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+    theme: flatly
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+library(igraph)
+library(here)
+```
+
+# **Introduction**
+
+This document explains **how the Product Space network is built** and then
+**constructs it from the raw files** saved in `data/raw/`. The companion
+`dataset_description.md` is the concise technical reference; here we give the
+conceptual reasoning behind the data, since understanding the construction is
+essential to interpreting every later result.
+
+# **What the network represents**
+
+The Product Space connects **traded products**. Two products are linked when the
+same countries tend to be competitive exporters of both. The economic intuition
+(Hidalgo & Hausmann) is that if a country is good at exporting two products, those
+products probably require **similar productive capabilities**, comparable skills,
+infrastructure, institutions and technology. Products that share exporters are
+therefore "close" in capability space.
+
+Crucially, the network is a **one-mode projection** of a bipartite
+country-product network. Countries are used to *build* it but are then collapsed
+away: the files contain products only. The country identities cannot be recovered.
+
+# **How an edge is built**
+
+## **1. From export values to competitive exports (RCA)**
+
+The raw input is for every country, how much it exports of every product (in dollars). Using dollar values directly is misleading, because large economies export a lot of everything. Example: a small country exporting $1B$ of steel may be highly *specialised* in steel, while a giant exporting $50B$ may simply be big. Absolute values would hide that.
+
+The **Revealed Comparative Advantage (RCA)** fixes this by comparing shares rather than absolute values:
+
+$$
+RCA_{c,p} \;=\;
+\frac{\; x_{c,p} \big/ \sum_{p'} x_{c,p'} \;}
+     {\; \sum_{c'} x_{c',p} \big/ \sum_{c'}\sum_{p'} x_{c',p'} \;}
+$$
+
+The numerator is product $p$'s share of country $c$'s exports; the denominator is
+$p$'s share of total world exports. If $RCA_{c,p} \ge 1$, product $p$ weighs more
+in country $c$ than it does worldwide, so the country is **specialised** in it. This
+normalises away country size, so we compare *specialisations*, not magnitudes.
+
+We then reduce everything to a binary country x product matrix:
+
+$$
+M_{c,p} =
+\begin{cases}
+1 & \text{if } RCA_{c,p} \ge 1 \quad(\text{country } c \text{ is competitive in } p)\\
+0 & \text{otherwise.}
+\end{cases}
+$$
+
+## **2. Projecting onto products (proximity)**
+
+Two products are "close" if the **same countries** are competitive in both. For
+products $i$ and $j$, proximity is the minimum of two conditional probabilities:
+
+$$
+\varphi_{i,j} \;=\;
+\min\Big[\,
+P\!\left(M_{\cdot,i}=1 \mid M_{\cdot,j}=1\right),\;
+P\!\left(M_{\cdot,j}=1 \mid M_{\cdot,i}=1\right)
+\,\Big]
+$$
+
+*Worked example* - Five countries, two products:
+
+| Country | T-shirts | Jackets |
+|---|:---:|:---:|
+| Bangladesh | 1 | 1 |
+| Vietnam | 1 | 1 |
+| China | 1 | 1 |
+| Italy | 0 | 1 |
+| Germany | 0 | 0 |
+
+Countries competitive in T-shirts: 3; in Jackets: 4.
+
+- $P(\text{T-shirts}\mid\text{Jackets}) = 3/4 = 0.75$
+- $P(\text{Jackets}\mid\text{T-shirts}) = 3/3 = 1.0$
+- $\varphi = \min(0.75, 1.0) = \mathbf{0.75}$ -> high -> the two products are close.
+
+By contrast, T-shirts vs microchips share almost no exporters -> $\varphi \approx 0$
+-> no edge.
+
+**Why the minimum?** To neutralise *ubiquitous* products (exported by almost
+everyone). For such a product, $P(\text{ubiquitous}\mid\text{anything})\approx 1$
+purely because everyone exports it, not because of shared capabilities. Requiring
+*both* directions to be high (the minimum) prevents a one-sided overlap from
+inflating the score.
+
+## **3. From a dense matrix to a backbone**
+
+Proximity is defined for *every* pair, so the full network is almost complete
+(~374,000 possible edges), mostly negligible. The distributed network is a
+**backbone**: a maximum spanning tree (guaranteeing one connected component) plus
+the links with $\varphi > 0.55$ (Hidalgo et al., 2007). 
+
+ A *spanning tree* is a minimal set of
+edges that connects every node into a single component without forming cycles
+(exactly *n − 1* edges for *n* nodes), the smallest possible skeleton that leaves
+no node isolated. Among all possible spanning trees, the *maximum* spanning tree
+is the one that maximises the total edge weight; here, where the weight is
+proximity, it is the skeleton that connects all products using the **strongest**
+available links. This step matters because applying the $\varphi > 0.55$ threshold alone
+could strip some products of all their links and fragment the network. By first
+laying down the maximum spanning tree and then overlaying every edge above the
+threshold, the construction yields a network that is simultaneously **sparse**
+(only strong links) and **fully connected** (no isolated products). This is
+precisely why the network we analyse has a single connected component and no
+isolated nodes.
+
+Every statistic in this project therefore describes the backbone, not the raw proximity matrix.
+
+## **4. What is kept and what is pruned**
+
+The construction *consumes* information that is then absent from the files: the
+country layer, the matrix $M$, the RCA values and the raw proximity matrix are all
+used and discarded. No country-level or geographic quantity is recoverable. Only
+the product nodes and their backbone edges remain.
+
+# **Constructing the network from raw files**
+
+> Install packages once, in the Console (not on knit): `install.packages(c("here","igraph"))`.
+
+## **Read and clean columns names**
+
+`check.names = FALSE` preserves the original headers; we strip the leading `#`.
+
+```{r load-raw}
+nodes_raw <- read.csv(here("data", "raw", "nodes.csv"),
+                      stringsAsFactors = FALSE, check.names = FALSE)
+edges_raw <- read.csv(here("data", "raw", "edges.csv"),
+                      stringsAsFactors = FALSE, check.names = FALSE)
+gprops    <- read.csv(here("data", "raw", "gprops.csv"),
+                      stringsAsFactors = FALSE, check.names = FALSE)
+
+clean_names <- function(x) trimws(gsub("^#\\s*", "", x))
+names(nodes_raw) <- clean_names(names(nodes_raw))
+names(edges_raw) <- clean_names(names(edges_raw))
+names(gprops)    <- clean_names(names(gprops))
+```
+
+## **Fix mislabelled columns and flag layout-only attributes**
+
+Headers follow the SITC layout, but this is the HS file: the column named `leamer` holds the **product name** and `name` holds the **hex colour**. We also rename `size`/`width` to make clear they are non-linear, layout-only.
+
+```{r fix-columns}
+nodes <- data.frame(
+  index       = as.integer(nodes_raw$index),
+  pid         = nodes_raw$pid,                 # HS product id
+  product     = trimws(nodes_raw$leamer),      # real product name
+  size_layout = nodes_raw$size,                # market share, non-linear, LAYOUT ONLY
+  color       = trimws(nodes_raw$name),        # hex colour = author community
+  stringsAsFactors = FALSE
+)
+```
+
+## **Recover the community from the colour**
+
+Each distinct colour is one author-defined community; we map it to an integer id
+to use later as a reference partition.
+
+```{r community-ref}
+nodes$community_ref <- as.integer(factor(nodes$color))
+cat("Reference communities:", length(unique(nodes$community_ref)), "\n")
+print(table(nodes$community_ref))
+```
+
+## **Parse layout coordinates**
+
+```{r parse-pos}
+parse_pos <- function(s) {
+  nums <- regmatches(s, gregexpr("-?[0-9]+\\.?[0-9]*", s))
+  do.call(rbind, lapply(nums, function(v) as.numeric(v[1:2])))
+}
+xy <- parse_pos(nodes_raw$pos)
+nodes$x <- xy[, 1]; nodes$y <- xy[, 2]
+```
+
+## **Clean edges**
+
+The `width` is layout-only and non-linear. We keep it as `width_layout` and will also expose it as an **ordinal** weight (see next chunk), used only for weighted-vs-unweighted robustness checks, never as the proximity $\varphi$.
+
+```{r clean-edges}
+edges <- data.frame(
+  source       = as.integer(edges_raw$source),
+  target       = as.integer(edges_raw$target),
+  width_layout = edges_raw$width,             # drawing thickness, non-linear, LAYOUT ONLY
+  stringsAsFactors = FALSE
+)
+```
+
+## **Build the graph with provenance metadata**
+
+We attach `width_layout` as the igraph `weight` so weighted variants are available as a robustness check, but **primary analyses treat the network as unweighted**. Provenance and the construction rule are stored as graph attributes so they travel with the object.
+
+```{r build-graph}
+vertices_df <- nodes[, c("index", "pid", "product", "community_ref",
+                         "size_layout", "color", "x", "y")]
+edges_df    <- edges[, c("source", "target", "width_layout")]
+
+g <- graph_from_data_frame(d = edges_df, directed = FALSE, vertices = vertices_df)
+
+# Expose the ordinal weight under igraph's canonical name, with the caveat recorded.
+E(g)$weight <- E(g)$width_layout
+
+g <- set_graph_attr(g, "name", "Product Space (HS)")
+g <- set_graph_attr(g, "source", "Coscia PS_HS.zip; Hidalgo et al. Science 2007")
+g <- set_graph_attr(g, "construction", "Maximum Spanning Tree + proximity phi > 0.55")
+g <- set_graph_attr(g, "note",
+  "weight is ordinal (from layout-only width); primary analyses unweighted, weighted as robustness check")
+
+layout_xy <- as.matrix(nodes[, c("x", "y")])
+```
+
+## **Verify and inspect**
+
+```{r verify}
+stopifnot(
+  vcount(g) == 866, ecount(g) == 2532,
+  !any(which_loop(g)), !any(which_multiple(g)), min(degree(g)) >= 1
+)
+cat("Nodes:", vcount(g), "| Edges:", ecount(g),
+    "| Components:", components(g)$no,
+    "| Weighted:", is_weighted(g),
+    "| Reference communities:", length(unique(V(g)$community_ref)), "\n")
+summary(g)
+head(igraph::as_data_frame(g, what = "vertices"))
+```
+
+### **A note on the edge weight**
+
+The graph reports `Weighted: TRUE`, so a word on what that means here. In igraph, a graph is "*weighted*" simply when its edges carry an attribute named `weight`; we created one by copying `width_layout` into it. The technical flag therefore says nothing about the *quality* of that weight, only that the attribute exists.
+
+What the weight actually is matters more. The value (ranging from 1 to 4) is the **drawing thickness** of the edge in the original Atlas visualization, which the official documentation describes as *non-linear* and *for layout purposes only*. It is **not** the proximity $\varphi$ and cannot be converted back to it. Concretely, an edge with `weight = 4` was drawn thicker than one with `weight = 1`, and this roughly tracks a higher proximity (thicker -> closer), but the relationship is non-linear: a weight of 4 does **not** mean "four times closer" than a weight of 1.The number preserves only the **ordering** of edge strengths, not their ratios. This is what we mean by calling it an **ordinal** weight: the ranking is informative, the magnitudes are not.
+
+For this reason our methodological choice is deliberate. **Primary analyses treat the network as unweighted**, since the weight is not a trustworthy quantitative measure. We nonetheless retain it as an attribute so that each analysis can be repeated in a **weighted variant as a robustness check**, confirming that conclusions do not hinge on the layout-only weight. In practice this means we will pass `weights = NA` where the unweighted result is wanted (to stop igraph from silently using the weight by default), and supply `E(g)$weight` explicitly only for the robustness comparison.
+
+## **Save Processed Objetcs**
+
+```{r save-processed}
+saveRDS(g,         here("data", "processed", "product_space.rds"))
+saveRDS(layout_xy, here("data", "processed", "layout_xy.rds"))
+write.csv(nodes, here("data", "processed", "nodes_clean.csv"), row.names = FALSE)
+write.csv(edges, here("data", "processed", "edges_clean.csv"), row.names = FALSE)
+list.files(here("data", "processed"))
+```
+
+# **Summary**
+
+The cleaned object is an **undirected** network of **866 products** and **2,532 backbone edges**, in a single connected component, carrying an **ordinal edge weight** (from the layout-only width, used only for robustness checks) and a **12-community reference partition** recovered from node colour. It is built from country export data via RCA and proximity, then reduced to a maximum-spanning-tree backbone with $\varphi > 0.55$. The country layer and the raw proximity values are not recoverable, so the analysis is product-side and topological.

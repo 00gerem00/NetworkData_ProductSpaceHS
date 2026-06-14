@@ -1,0 +1,101 @@
+---
+title: "The Product Space (HS): Descriptive Analysis"
+subtitle: "Statistical and Computational Methods for Network Data"
+author: "Matteo Gerevini, Beatrice Liuni, Lorenzo Meroni"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+    theme: flatly
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+library(igraph)
+library(here)
+library(tidyverse)
+```
+
+# **Data Loading**
+
+```{r load-graph}
+g <- readRDS(here("data", "processed", "product_space.rds"))
+layout_xy <- readRDS(here("data", "processed", "layout_xy.rds"))
+summary(g)
+```
+
+# **Exploratory Data Analysis**
+
+```{r view-tables}
+# A graph stores two tables underneath: one for nodes, one for edges.
+# We extract them and convert to tibbles for clean printing and later use.
+# Note: igraph:: prefix is needed because dplyr masks as_data_frame().
+
+nodes_tbl <- igraph::as_data_frame(g, what = "vertices") |> as_tibble()
+edges_tbl <- igraph::as_data_frame(g, what = "edges")    |> as_tibble()
+
+# A first look at the node table (one row per product)
+nodes_tbl |> select(name, pid, product, community_ref, size_layout) |> head(10)
+
+# A first look at the edge table (one row per proximity link)
+edges_tbl |> head(10)
+```
+
+## **Data Quality Check**
+
+```{r}
+# Missing values in the node and edge tables
+sum(is.na(nodes_tbl))
+sum(is.na(edges_tbl))
+
+# Duplicated edges (same product pair appearing more than once)
+any(which_multiple(g))
+
+# Self-loops
+any(which_loop(g))
+
+# 4. Isolated nodes
+sum(degree(g) == 0)
+```
+
+The dataset is clean at the source: there are no missing values
+in either the node or edge tables, no duplicated edges, no self-loops, and no
+isolated products. No additional cleaning is therefore required before analysis.
+This also answers the *missingness* question from Stage 1: there is no accidental
+missing data, the only data reduction is the deliberate backbone thinning
+(maximum spanning tree + $\varphi > 0.55$), which removes weak proximity
+links by design rather than by error.
+
+## **Network Size and Connectivity**
+
+
+```{r}
+# Number of nodes (products) and edges (proximity links)
+vcount(g)
+ecount(g)
+
+# Density: fraction of possible edges that actually exist.
+edge_density(g)
+
+# Number of connected components
+components(g)$no
+
+# Diameter: the longest shortest path in the network.
+# weights = NA forces the UNWEIGHTED version (count steps, not edge widths)
+# our primary analysis, given the layout-only weight.
+diameter(g, weights = NA)
+
+# Average shortest-path distance between any two products
+mean_distance(g, weights = NA)
+```
+
+**Network size and connectivity.** The network has 866 products and 2,532
+proximity links. Its density is very low ($\approx 0.0068$): only about 0.7% of all
+possible edges are present, as expected for a pruned backbone. Despite being
+sparse, the network forms a **single connected component**, so every product is
+reachable from every other.
+
+The **diameter is 21** (the longest shortest path) and the **average distance is $\approx 7.1$** steps between two products. These values are fairly large for a network of this size, which suggests the products are not all tightly packed together but
+spread out across the network. We will look at this structure more closely with centrality and community detection.
