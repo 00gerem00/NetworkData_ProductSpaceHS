@@ -1,0 +1,639 @@
+---
+title: "The Product Space (HS): Descriptive Analysis"
+subtitle: "Statistical and Computational Methods for Network Data"
+author: "Matteo Gerevini, Beatrice Liuni, Lorenzo Meroni"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+    theme: flatly
+---
+
+# **Descriptive Analysis**
+
+>  All the statistics in this analysis describe the
+> distributed network, which is a *pruned backbone* of the full product space
+> (a maximum spanning tree plus the links with $\varphi > 0.55$), not the complete
+> proximity matrix. Weak proximity links were removed by construction, so measures
+> such as density, degree, clustering, and distances refer to this strong-link
+> backbone only. We keep this in mind when interpreting the results, and we note it
+> explicitly where it matters.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+library(igraph)
+library(here)
+library(tidyverse)
+```
+
+## **Data Loading**
+
+```{r load-graph}
+g = readRDS(here("data", "processed", "product_space.rds"))
+layout_xy = readRDS(here("data", "processed", "layout_xy.rds"))
+summary(g)
+```
+
+## **Descriptive Analysis of the Data**
+
+This notebook performs the descriptive analysis of the Product Space (HS) network.
+It loads the cleaned graph produced in the `data_preparation.Rmd` and explores its
+basic properties. We first check what the vertices and edges represent, whether we observe the full
+system or only a part, and whether there is sampling or missing data.
+
+```{r view-tables}
+nodes_tbl = igraph::as_data_frame(g, what = "vertices") |> as_tibble()
+edges_tbl = igraph::as_data_frame(g, what = "edges")    |> as_tibble()
+
+nodes_tbl |> select(name, pid, product, community_ref, size_layout) |> head(10)
+
+edges_tbl |> head(10)
+```
+
+The edge table shows two metric columns, `width_layout` and `weight`, with the same values; this is on purpose. 
+
+The original value is the line *thickness* used to draw the network in the Atlas
+visualization. According to the dataset documentation this thickness is
+non-linear and meant for layout only, so it is **not** the true proximity score
+$\varphi$ and should not be read as a real edge weight. We keep it under two names
+for two reasons: `width_layout` records what the value really is (a drawing
+thickness), while `weight` is the name that igraph looks for when running weighted
+computations. Our main analyses treat the network as **unweighted**; we use the
+weight only later, as a robustness check, to confirm that results do not depend on
+this layout-only value.
+
+### **Communities**
+
+The dataset assigns each product to one of twelve **communities**, stored in the
+`community_ref` attribute. These were recovered from the official Product Space
+colours: in the original visualization each product is coloured by the group it
+belongs to, and we mapped those colours back to a community label. It is important
+to be clear about their status: the communities are a given attribute of the dataset, not something we compute. They are a ready-made grouping that we use as
+a key to read the rest of the analysis. Later, in the modelling part, we will run
+a community-detection algorithm and use these official communities as a benchmark
+to compare against; here we simply describe them.
+
+We present the communities now, before the structural analysis, so that the
+following sections (degree, clustering, centrality) can be read with these groups
+already in mind.
+
+### **Community Sizes**
+
+```{r community-sizes}
+nodes_tbl |> count(community_ref, sort = TRUE)
+```
+
+The twelve communities are very uneven in size. The largest, community 2, contains
+252 products (about 29% of the network), while the smallest, community 1, contains
+only 19. A few large communities account for most of the products, and several
+small ones cover the rest.
+
+### **What each Community represents**
+
+To turn these groups from numbers into something interpretable, we look at a sample 
+of products from each one.
+
+```{r community-products}
+nodes_tbl |>
+  select(community_ref, product) |>
+  arrange(community_ref) |>
+  group_by(community_ref) |>
+  slice_head(n = 6) |>
+  print(n = 72)
+```
+
+Reading the products in each group, the communities line up with recognisable
+economic sectors. The labels below are **our own descriptive reading**, based on
+the most representative products; they are not official categories provided by the
+dataset.
+
+| Community | Size | Descriptive label |
+|-----------|------|--------------------|
+| 2  | 252 | Heavy machinery, transport equipment and metalworking |
+| 11 | 103 | Livestock and fishing products |
+| 8  | 90  | Fine and specialty chemicals |
+| 3  | 82  | Raw minerals and metals |
+| 4  | 81  | Textiles and apparel |
+| 7  | 59  | Electronics and precision machinery |
+| 9  | 50  | Mixed goods (no single clear sector) |
+| 12 | 43  | Paper, wood and construction materials |
+| 6  | 38  | Agri-food and basic chemicals |
+| 10 | 27  | Fresh agricultural products and tobacco |
+| 5  | 22  | Light consumer goods and miscellany |
+| 1  | 19  | Precision instruments and luxury goods |
+
+Most communities are clearly tied to a sector: textiles and apparel (community 4),
+raw minerals (3), fine chemicals (8), livestock and fishing (11), electronics (7),
+and so on. This coherence is also a sanity check on the data: products grouped
+together do share an economic logic, which confirms that the community labels are
+meaningful and correctly aligned with the products.
+
+A few products sit in a community that does not match their obvious type,for
+example a woven-wool fabric inside the machinery community. This is expected rather
+than an error: the communities come from **co-export patterns**, not from a product
+classification, so a product is grouped with others exported by the same countries,
+which need not be of the same kind. Community 9 is the hardest to label, mixing
+silk, printed matter, fishing vessels and explosives; we keep it as "mixed".
+
+These descriptive labels are used from here on as a reading key for the network: in
+the following sections and in the map, each community can be referred to by its
+sector rather than by a number alone.
+
+### **Data Quality Check**
+
+Before analysing the structure, we check that the data are clean: no missing
+values, no duplicated edges, no self-loops, and no isolated products.
+
+```{r data-quality}
+sum(is.na(nodes_tbl))
+sum(is.na(edges_tbl))
+
+any(which_multiple(g))
+
+any(which_loop(g))
+
+sum(degree(g) == 0)
+```
+
+The dataset is clean at the source: there are no missing values in either table, no
+duplicated edges, no self-loops, and no isolated products. No additional cleaning is
+needed before analysis. This also answers the *missingness* question from the
+network-mapping framework: there is no accidental missing data. The only reduction
+is the backbone construction (maximum spanning tree + $\varphi > 0.55$), which
+removes weak links on purpose, not by mistake.
+
+## **Network Structure**
+
+Having described what the dataset contains, its products, links, communities, and
+overall quality, we now analyse the structure of the network: how the products
+are connected, how the connections are distributed, and which products and links
+play the most important roles. We move from global properties (size, connectivity)
+to local ones (degree, clustering, centrality), and finally to the links
+themselves (edge attributes). Throughout, we read the results with the twelve
+communities introduced above in mind.
+
+### **Network Size and Connectivity**
+
+We begin with the global properties of the network: its size, how densely the
+products are connected, whether it forms a single piece, and how far apart products
+are from one another.
+
+```{r network-size}
+vcount(g)
+ecount(g)
+
+edge_density(g)
+
+components(g)$no
+
+diameter(g, weights = NA)
+
+mean_distance(g, weights = NA)
+```
+
+The network has 866 products and 2,532 proximity links. Its density is very low
+($\approx 0.0068$): only about 0.7% of all possible edges are present, as expected
+for a pruned backbone. Despite being sparse, the network forms a **single connected
+component**, so every product is reachable from every other. This is partly
+guaranteed by construction: the maximum spanning tree at the core of the backbone
+connects all products by design.
+
+The diameter is 21 (the longest shortest path) and the average distance is
+$\approx 7.1$ steps between two products. We will interpret these values together
+with the degree and centrality results in the next sections, rather than drawing
+conclusions now.
+
+### **Degree**
+
+The degree of a product is the number of other products it is directly connected
+to. It is the simplest measure of how connected a product is, and the starting
+point for understanding the local structure of the network.
+
+```{r degree}
+deg = degree(g)
+summary(deg)
+```
+
+The summary shows a strong imbalance. The median degree is only 2, so half of the
+products have two connections or fewer, while the mean is about 5.8 and the maximum
+reaches 48. When the mean sits well above the median, the distribution is skewed to
+the right: most products have few links, and a small number act as highly connected hubs.
+
+```{r degree-top10}
+nodes_tbl|>
+  mutate(degree = deg)|>
+  arrange(desc(degree))|>
+  select(product, community_ref, degree)|>
+  head(10)
+```
+
+The ten most connected products are mostly heavy-manufacturing goods (forged steel
+balls, transmission shafts, cast iron articles) together with a few others such as
+bricks and T-shirts. Notably, most of them belong to community 2 (heavy machinery
+and metalworking), the largest community. We return to what this concentration
+means when we look at centrality and at the network map.
+
+#### **Degree Distribution**
+
+```{r degree-histogram}
+deg_tbl = tibble(degree = deg)
+
+ggplot(deg_tbl, aes(x = degree)) +
+  geom_histogram(binwidth = 1, fill = "steelblue", color = "black") +
+  labs(title = "Degree distribution",
+       x = "Degree", y = "Number of products") +
+  theme_minimal() +
+  theme(panel.grid.minor = element_blank())
+```
+
+The histogram confirms the imbalance seen in the summary.
+The large majority of products have a very low degree, with a tall peak at degree 1
+(about 285 products) that drops off quickly. To the right there is a long, thin
+tail of products with much higher degree, up to the single product with degree 48.
+The shape is strongly
+right-skewed: many low-degree products and a few high-degree hubs.
+
+The histogram shows that the distribution has a heavy tail, but on a linear scale
+that tail is compressed against the axis and its exact shape is hard to judge. A
+common way to inspect heavy-tailed distributions is to plot them on a log-log
+scale, where both axes are logarithmic. The reason is mathematical: if the degree
+distribution follows a power law, $P(k) \propto k^{-\alpha}$, taking logs of both
+sides turns the curve into a straight line,
+
+$$
+\log P(k) = c - \alpha \, \log k,
+$$
+
+so a power law, which is hard to recognise on a linear scale, appears as a
+descending straight line with slope $-\alpha$. We use this plot to check whether
+the degree distribution has that shape.
+
+```{r degree-loglog}
+deg_dist = as.data.frame(table(deg)) |>
+  rename(degree = deg, freq = Freq) |>
+  mutate(degree = as.numeric(as.character(degree)))
+
+ggplot(deg_dist, aes(x = log(degree), y = log(freq))) +
+  geom_point(color = "darkblue") +
+  labs(title = "Degree distribution (log-log scale)",
+       x = "log(Degree)", y = "log(Frequency)") +
+  theme_minimal() +
+  theme(panel.grid.minor = element_blank())
+```
+
+In our plot the points fall roughly along such a descending line, which is
+consistent with a power-law degree distribution, though a
+straight log-log shape alone does not prove a power law. The points are cleaner on
+the left (low degrees), where each degree value is shared by many products, and
+noisier on the right (high degrees), where only a few products take each value and
+the frequencies are estimated less reliably. In the next step we estimate the exponent that describes this shape.
+
+#### **Estimating the Power-Law Exponent**
+
+To estimate the exponent $\alpha$, we fit a model to the degree-frequency data.
+
+A common shortcut is to fit a linear model to the log-frequencies against the
+log-degrees and read the slope as $-\alpha$. We avoid this, because the assumptions
+of linear regression are not satisfied here. The response is the frequency of
+each degree value, a *count* (how many products have a given degree), which is
+discrete, non-negative, and has a variance that grows with its mean. Linear
+regression instead assumes a continuous response with normal, constant-variance
+errors. Taking the logarithm of the frequencies does not fix this: it distorts the
+weighting of the points, giving the sparse, noisy high-degree tail (where many
+frequencies equal 1, so their log is 0) the same weight as the well-populated
+low-degree part. A linear fit would therefore give an unreliable estimate.
+
+The appropriate tool for a count response is a Poisson regression, fitted with
+`glm()`. It models the counts directly through a log link, without logging the
+response, and uses the Poisson distribution, which is built for non-negative counts
+with mean-dependent variance.
+
+```{r degree-glm}
+fit_glm = glm(freq ~ log(degree), family = poisson, data = deg_dist)
+summary(fit_glm)
+```
+
+The coefficient of `log(degree)` is about $-1.33$ (z $= -43$, p $< 0.001$), so the
+estimated exponent is $\alpha \approx 1.33$. The very small p-value and the large
+drop from the null deviance (2032) to the residual deviance (46) confirm that
+degree explains the frequencies well.
+
+```{r degree-glm-plot}
+glm_int   = coef(fit_glm)[1]
+glm_slope = coef(fit_glm)[2]
+
+ggplot(deg_dist, aes(x = log(degree), y = log(freq))) +
+  geom_point(color = "darkblue") +
+  geom_abline(intercept = glm_int, slope = glm_slope,
+              color = "red", linewidth = 0.5) +
+  labs(title = "Degree Distribution with fitted Poisson slope",
+       x = "log(Degree)", y = "log(Frequency)") +
+  theme_minimal() +
+  theme(panel.grid.minor = element_blank())
+```
+
+This exponent is on the low side. We leave its assessment to the modelling part,
+where it can be compared with the values produced by the generative models. As
+noted in the backbone caveat, our network is also a pruned backbone, which affects
+the tail of the distribution.
+
+The degree distribution is strongly
+heavy-tailed: most products have very few links, while a small number of hubs are
+highly connected, the most connected reaching degree 48. These hubs are mostly
+heavy-machinery goods from community 2. This uneven distribution is the first
+structural feature of the network; the next sections examine whether these hubs are
+also the most clustered and the most central.
+
+### **Clustering and Transitivity**
+
+After looking at how connected each product is, we ask whether the
+neighbours of a product are also connected to each other, i.e. whether the network
+forms *triangles*.
+
+For a vertex $v$, let $\tau_\triangle(v)$ be the number of triangles involving $v$,
+and $\tau_3(v) = \binom{d_v}{2}$ the number of connected triples (wedges) centred on
+$v$. The local clustering coefficient is
+
+$$
+cl(v) = \frac{\tau_\triangle(v)}{\tau_3(v)},
+$$
+
+defined for vertices with degree at least 2. It measures, among the pairs of
+neighbours of $v$, how many are actually connected.
+
+These local values can be aggregated to the whole network in two ways:
+
+$$
+cl(G) = \frac{1}{|V'|}\sum_{v \in V'} cl(v); 
+\qquad cl_T(G) = \frac{\sum_{v \in V'}\tau_\triangle(v)}{\sum_{v \in V'}\tau_3(v)}.
+$$
+
+The first is a simple average of the local coefficients; the second, the
+transitivity, is a weighted average. Following Bollobás and Riordan, we use the
+transitivity $cl_T(G)$ as our main measure, since the weighting makes it less
+sensitive to low-degree vertices. Values close to 1 indicate a highly clustered
+network; values close to 0 indicate few triangles.
+
+```{r clustering}
+# Transitivity: cl_T(G)
+transitivity(g, type = "global")
+
+# Clustering coefficient: cl(G)
+transitivity(g, type = "average")
+```
+
+The transitivity is $cl_T(G) \approx 0.43$ and the simple clustering coefficient is
+$cl(G) \approx 0.28$. Both are moderate-to-high values: the neighbours of a product
+are often connected to each other, so the network forms a fair number of triangles.
+This is the quantitative counterpart of the sector groups described in earlier sections:
+products that belong to the same community tend to be linked to one another, which
+produces triangles within each group. The value is notable given that we work with
+a pruned backbone, where removing weak links also removes potential triangles.
+
+The two measures also differ ($cl_T(G) > cl(G)$). In the transitivity, each vertex
+$v$ is weighted by $\tau_3(v) = \binom{d_v}{2}$, the number of connected triples
+centred on it. Since this grows quickly with degree, hubs receive much larger
+weights than peripheral nodes. The fact that the weighted measure is higher than the
+simple average therefore suggests that the more connected products (the hubs) tend
+to be more clustered than the peripheral ones: their neighbours are also often
+linked to one another.
+
+Together with the heavy-tailed degree distribution, this clustering completes a
+consistent picture so far: a few highly connected, densely interconnected hubs
+alongside many peripheral products, with connections concentrated inside the sector
+communities.
+
+#### **Clustering Within Communities**
+
+The global transitivity describes the network as a whole. A natural next question
+is whether clustering is uniform across the network or whether some communities are
+more tightly knit than others. We compute the transitivity of each community
+separately, by taking the subgraph of the products in that community and measuring
+how often their links close into triangles.
+
+```{r clustering-by-community}
+# Transitivity computed within each community's subgraph
+comm_clustering <- nodes_tbl |>
+  distinct(community_ref) |>
+  arrange(community_ref) |>
+  mutate(
+    n_products   = map_int(community_ref, ~ sum(V(g)$community_ref == .x)),
+    transitivity = map_dbl(community_ref, function(c) {
+      sub = induced_subgraph(g, V(g)[V(g)$community_ref == c])
+      transitivity(sub, type = "global")
+    })
+  )
+
+comm_clustering |> arrange(desc(transitivity))
+```
+
+The within-community transitivity varies widely,
+from 0.73 down to 0. The global value of 0.43 was therefore an average that hides
+strong differences between groups. The most tightly knit communities are textiles
+and apparel (community 4, 0.73), agri-food and basic chemicals (6, 0.56), and
+paper, wood and construction (12, 0.52): in these sectors the products are almost
+all interconnected. At the other end, raw minerals (3, 0.13), luxury and precision
+goods (1, 0) and the mixed community 9 (0) form few or no internal triangles, which
+fits the fact that these groups are more heterogeneous.
+
+A notable point concerns community 2 (heavy machinery), the largest community and
+the one containing the most central products. Its internal transitivity is only
+0.27, below the global average. So community 2 is large and central without forming
+a dense internal block: its products are not heavily interconnected among
+themselves. Smaller communities such as textiles are far more self-contained: fewer
+products, but almost fully interconnected. Why community 2 is nonetheless so central
+becomes clearer when we look at centrality and at the links between communities.
+
+This refines the earlier picture: clustering is not uniform but concentrated inside
+certain sector communities, while the central hub community is comparatively open.
+
+### **Centrality**
+
+The degree section asked how many links a product has. We now ask a broader
+question: how important is a product in the network? This is the idea of
+centrality. There is no single definition of importance, so rather than pick one
+measure, we consider four standard ones, each built on a different idea, and then
+select those that are most informative for this network.
+
+- Degree centrality counts direct neighbours. Already studied in Section 3.2,
+  here it serves as a baseline.
+- Closeness centrality is based on *distance*: a product is important if it is
+  close, on average, to all others through short paths.
+- Betweenness centrality is based on *flow*: a product is important if it lies
+  on many shortest paths between other products, acting as a bridge.
+- **Eigenvector centrality** is based on *feedback*: a product is important if it is
+  connected to other important products.
+
+For a vertex $v \in V$:
+
+**Closeness** is the inverse of the total distance from $v$ to all other vertices,
+
+$$
+c_{Cl}(v) = \frac{1}{\sum_{u \in V} \mathrm{dist}(v, u)},
+$$
+
+so a small total distance gives a large closeness. It is only well-defined on a
+connected graph; ours is a single component, so this is not a problem.
+
+**Betweenness** counts how often $v$ sits on shortest paths between other vertices,
+
+$$
+c_B(v) = \sum_{s \neq t \neq v \in V} \frac{\sigma(s, t \mid v)}{\sigma(s, t)},
+$$
+
+where $\sigma(s, t)$ is the number of shortest paths between $s$ and $t$, and
+$\sigma(s, t \mid v)$ the number of those passing through $v$.
+
+**Eigenvector centrality** (Bonacich) defines importance recursively, as
+proportional to the sum of the neighbours' importances,
+
+$$
+c_{Ei}(u) = \alpha \sum_{\{u, v\}} c_{Ei}(v),
+$$
+
+which in matrix form is the leading-eigenvector problem for the adjacency matrix
+$A$: $A\,\vec{c}_{Ei} = \alpha^{-1}\,\vec{c}_{Ei}$. All these measures are computed
+on the pruned backbone, since they depend on the shortest paths within it.
+
+#### **Selecting the Measures**
+
+We do not use all four measures blindly. A measure is useful only if it adds
+information that degree does not already give: if it ranks products almost like
+degree, it is redundant. To check this, we plot each of the three other measures
+against degree.
+
+```{r centrality-explore}
+clos = closeness(g, weights = NA)
+betw = betweenness(g, weights = NA)
+eig  = eigen_centrality(g, weights = NA)$vector
+
+cent_explore = tibble(
+  degree      = deg  / max(deg),
+  closeness   = clos / max(clos),
+  betweenness = betw / max(betw),
+  eigenvector = eig  / max(eig)
+)
+```
+
+> We rescale the measures in order to make a better visual comparison of the centrality measures considered.
+
+```{r centrality-pairs}
+cent_explore |>
+  pivot_longer(c(closeness, betweenness, eigenvector),
+               names_to = "measure", values_to = "value") |>
+  ggplot(aes(x = degree, y = value)) +
+  geom_point(alpha = 0.4, color = "darkblue") +
+  facet_wrap(~ measure, scales = "free_y") +
+  labs(title = "Degree vs other centrality measures (rescaled)",
+       x = "Degree (rescaled)", y = "Other measure (rescaled)") +
+  theme_minimal()
+```
+
+The three panels show how much each measure adds beyond degree.
+
+* **Betweenness (left)**: The points form a widely dispersed cloud with no clear
+trend. At any given degree, betweenness ranges from near zero up to high values:
+several products with very low degree (around 0.05–0.15 on the rescaled axis) reach
+betweenness of 0.4–0.6, while many products with high degree have betweenness close
+to zero. Knowing a product's degree tells us almost nothing about its betweenness.
+This measure is therefore strongly independent of degree and carries genuinely
+new information: it identifies products that act as bridges regardless of how many
+links they have.
+
+* **Closeness (centre)**: The shape is structured but not redundant. There is a dense
+vertical band at low degree where closeness spans almost the entire range (from
+about 0.35 to 0.9): products with the same low degree can be very differently
+placed, some close to the rest of the network, some far. As degree increases,
+closeness rises and then flattens towards a ceiling near 1, so high-degree products
+are consistently close to everything. Closeness thus partly follows degree, but
+adds clear information among the low-degree products, separating those that are
+well positioned from those that are peripheral despite the same number of links.
+
+* **Eigenvector (right)**: The points trace a clean, increasing curve: eigenvector
+stays near zero for almost all products until degree becomes high (above $\approx 0.4$ on
+the rescaled axis), then rises steeply towards 1. This is close to a deterministic
+function of degree, knowing the degree essentially predicts the eigenvector
+ranking. The measure is therefore largely redundant with degree and adds little.
+
+Reading the three together, betweenness brings the most new information (fully
+independent of degree), closeness brings useful additional information concentrated
+among low-degree products, and eigenvector brings little beyond what degree already
+tells us. We therefore keep betweenness and **closeness** for the analysis,
+alongside degree as a baseline, and set eigenvector centrality aside.
+
+#### **Analysis on Selected Measures**
+
+We store the selected measures as vertex attributes and examine which products they
+rank as central.
+
+```{r centrality-compute}
+V(g)$degree      = deg
+V(g)$betweenness = betw
+V(g)$closeness   = clos
+vertex_attr_names(g)
+```
+
+The three measures are now part of the network object. We build a table and look at
+the most central products under each of the two selected measures.
+
+```{r centrality-tables}
+cent_tbl <- tibble(
+  product       = V(g)$product,
+  community_ref = V(g)$community_ref,
+  degree        = V(g)$degree,
+  betweenness   = V(g)$betweenness,
+  closeness     = V(g)$closeness
+)
+```
+
+```{r centrality-top-betweenness}
+# Top 10 by betweenness (the bridging role)
+cent_tbl |> arrange(desc(betweenness)) |>
+  select(product, community_ref, betweenness, degree) |> head(10)
+```
+
+```{r centrality-top-closeness}
+# Top 10 by closeness (the short-reach role)
+cent_tbl |> arrange(desc(closeness)) |>
+  select(product, community_ref, closeness, degree) |> head(10)
+```
+
+The top products by betweenness are mostly metal and machinery goods, but three of
+them have very low degree: electrical machinery parts (degree 6), aircraft engines
+(degree 3), and dried potatoes (degree 4). The top products by closeness, in
+contrast, all have medium-to-high degree (22–48). The forged steel balls (degree
+48) rank first in both lists, and most of the central products in both belong to
+community 2 (heavy machinery).
+
+```{r centrality-scatter-betweenness}
+ggplot(cent_tbl, aes(x = degree, y = betweenness)) +
+  geom_point(alpha = 0.5, color = "darkblue") +
+  labs(title = "Degree vs betweenness", x = "Degree", y = "Betweenness") +
+  theme_minimal() + theme(panel.grid.minor = element_blank())
+```
+
+```{r centrality-scatter-closeness}
+ggplot(cent_tbl, aes(x = degree, y = closeness)) +
+  geom_point(alpha = 0.5, color = "darkblue") +
+  labs(title = "Degree vs closeness", x = "Degree", y = "Closeness") +
+  theme_minimal() + theme(panel.grid.minor = element_blank())
+```
+
+The scatter plots explain the difference. Degree versus betweenness is a dispersed
+cloud with no clear trend: betweenness is not determined by degree, so it captures
+an independent bridging role, and this is why low-degree products can still rank at
+the top. Degree versus closeness instead shows a clear shape: closeness rises with
+degree and then flattens towards a ceiling, and high closeness appears only together
+with at least medium degree. Closeness therefore tracks degree more closely, while
+still distinguishing low-degree products that are well positioned from those that
+are peripheral.
+
+Overall, centrality points to two kinds of important products: well-embedded
+products scoring high on both degree and closeness (forged steel balls, transmission
+shafts), and pure bridges scoring high on betweenness despite low degree (aircraft
+engines, dried potatoes). No single measure captures both roles. The concentration
+of central products in community 2 confirms, from a different angle, that this
+community acts as the connective core of the network, consistent with its large
+size and comparatively low internal clustering seen earlier.
