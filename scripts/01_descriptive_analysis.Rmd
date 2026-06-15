@@ -126,20 +126,29 @@ dataset.
 
 Most communities are clearly tied to a sector: textiles and apparel (community 4),
 raw minerals (3), fine chemicals (8), livestock and fishing (11), electronics (7),
-and so on. This coherence is also a sanity check on the data: products grouped
+and so on. This coherence is also a **sanity check** on the data: products grouped
 together do share an economic logic, which confirms that the community labels are
 meaningful and correctly aligned with the products.
 
-A few products sit in a community that does not match their obvious type,for
+A few products sit in a community that does not match their obvious type — for
 example a woven-wool fabric inside the machinery community. This is expected rather
-than an error: the communities come from **co-export patterns**, not from a product
-classification, so a product is grouped with others exported by the same countries,
-which need not be of the same kind. Community 9 is the hardest to label, mixing
-silk, printed matter, fishing vessels and explosives; we keep it as "mixed".
+than an error, for two complementary reasons. First, the communities come from
+**co-export patterns**, not from a product classification: a product is grouped with
+others exported by the same countries, which need not be of the same kind. Second,
+the community labels are defined on the **full** proximity network, while the links
+we analyse belong to the **pruned backbone** (maximum spanning tree plus the
+strongest links, as noted at the start). A product keeps its original label even if,
+after pruning, its few surviving links connect it mostly to other groups: the strong
+links that justified its community may have been removed, while weaker cross-group
+links happened to survive. An apparent "misplacement" therefore reflects the
+backbone construction, not a wrong assignment. Community 9 is the hardest to label,
+mixing silk, printed matter, fishing vessels and explosives; we keep it as "mixed".
 
 These descriptive labels are used from here on as a reading key for the network: in
 the following sections and in the map, each community can be referred to by its
-sector rather than by a number alone.
+sector rather than by a number alone. We will also see, when analysing the links
+between communities, that this gap between labels and pruned connections has a
+visible effect on the network's structure.
 
 ### **Data Quality Check**
 
@@ -457,11 +466,11 @@ centrality. There is no single definition of importance, so rather than pick one
 measure, we consider four standard ones, each built on a different idea, and then
 select those that are most informative for this network.
 
-- Degree centrality counts direct neighbours. Already studied in Section 3.2,
+- **Degree centrality** counts direct neighbours. Already studied in Section 3.2,
   here it serves as a baseline.
-- Closeness centrality is based on *distance*: a product is important if it is
+- **Closeness centrality** is based on *distance*: a product is important if it is
   close, on average, to all others through short paths.
-- Betweenness centrality is based on *flow*: a product is important if it lies
+- **Betweenness centrality** is based on *flow*: a product is important if it lies
   on many shortest paths between other products, acting as a bridge.
 - **Eigenvector centrality** is based on *feedback*: a product is important if it is
   connected to other important products.
@@ -620,7 +629,6 @@ ggplot(cent_tbl, aes(x = degree, y = closeness)) +
   labs(title = "Degree vs closeness", x = "Degree", y = "Closeness") +
   theme_minimal() + theme(panel.grid.minor = element_blank())
 ```
-
 The scatter plots explain the difference. Degree versus betweenness is a dispersed
 cloud with no clear trend: betweenness is not determined by degree, so it captures
 an independent bridging role, and this is why low-degree products can still rank at
@@ -630,10 +638,333 @@ with at least medium degree. Closeness therefore tracks degree more closely, whi
 still distinguishing low-degree products that are well positioned from those that
 are peripheral.
 
-Overall, centrality points to two kinds of important products: well-embedded
-products scoring high on both degree and closeness (forged steel balls, transmission
-shafts), and pure bridges scoring high on betweenness despite low degree (aircraft
-engines, dried potatoes). No single measure captures both roles. The concentration
-of central products in community 2 confirms, from a different angle, that this
-community acts as the connective core of the network, consistent with its large
-size and comparatively low internal clustering seen earlier.
+Overall, centrality points to two kinds of important products: those scoring high
+on both degree and closeness (such as the forged steel balls and transmission
+shafts), which are highly connected and close to the rest of the network, and pure
+bridges scoring high on betweenness despite a low degree (such as aircraft engines
+and dried potatoes). No single measure captures both roles, which is why we kept
+more than one. Most of the central products under both measures belong to community
+2 (heavy machinery). Together with its low internal clustering seen earlier, this
+suggests that community 2 acts as a connective core: central to the network as a
+whole without being densely knit inside. We examine the links between communities
+in the next section.
+
+### **Edge-Level Attributes**
+
+We now compute two attributes of
+the edges, to describe the links themselves rather than the products.
+
+- **Edge betweenness** is betweenness applied to edges: for each link, the number of
+  shortest paths in the network that pass through it. A link with high edge
+  betweenness is a critical bridge, whose removal would lengthen or cut the
+  connection between parts of the network.
+- **Intra/inter-community flag** marks, for each link, whether it connects two
+  products of the same community (*intra*) or of two different communities (*inter*).
+
+```{r edge-attributes}
+E(g)$betweenness = edge_betweenness(g, weights = NA)
+
+el   = as_edgelist(g, names = FALSE)
+comm = V(g)$community_ref
+E(g)$cross_community = ifelse(
+  comm[el[, 1]] == comm[el[, 2]], "intra", "inter"
+)
+
+edge_attr_names(g)
+```
+
+#### **Within- and Between-Community Links**
+
+We first look at how many links stay inside a community and how many cross between
+communities.
+
+```{r edge-counts}
+tibble(cross_community = E(g)$cross_community) |>
+  count(cross_community) |>
+  mutate(pct = round(n / sum(n) * 100, 2))
+```
+
+Of the 2,532 links, 1,966 (about 78%) stay within a community and only 566 (about
+22%) cross between communities. Most connections therefore join products of the same
+community. This is consistent with the high transitivity and the
+sector communities described: products link mainly within their own
+group, and only a minority of links bridge across groups.
+
+#### **Edge Betweenness of Within- and Between-Community Links**
+
+A common expectation is that between-community links carry more shortest paths than
+within-community ones, since they are the few bridges connecting otherwise dense
+groups, while inside a community there are many alternative short paths. We test
+this by comparing the edge-betweenness distribution of the two types of link. We use
+a violin plot on a logarithmic scale, because edge betweenness is highly
+right-skewed (most links carry few paths, a few carry very many), and a log scale
+makes the bulk of the distribution readable rather than compressed against the axis.
+If the expectation holds, the *inter* distribution should sit higher than the
+*intra* one
+
+```{r edge-betweenness-dist}
+tibble(
+  betweenness     = E(g)$betweenness,
+  cross_community = E(g)$cross_community
+) |>
+  ggplot(aes(x = cross_community, y = betweenness + 1, fill = cross_community)) +
+  geom_violin(alpha = 0.5, color = NA) +
+  geom_boxplot(width = 0.15, alpha = 0.7, outlier.size = 0.5) +
+  scale_y_log10() +
+  scale_fill_manual(values = c("inter" = "firebrick", "intra" = "steelblue")) +
+  labs(title = "Edge betweenness: within vs between communities",
+       x = NULL, y = "Edge betweenness (log scale)") +
+  theme_minimal() +
+  theme(panel.grid.minor = element_blank(), legend.position = "none")
+```
+
+```{r median-quartiles}
+tibble(
+  betweenness     = E(g)$betweenness,
+  cross_community = E(g)$cross_community
+) |>
+  group_by(cross_community) |>
+  summarise(
+    median = median(betweenness),
+    q1     = quantile(betweenness, 0.25),
+    q3     = quantile(betweenness, 0.75)
+  )
+```  
+
+The two distributions are broadly similar in shape: both are strongly right-skewed,
+with most links carrying few shortest paths and a long upper tail reaching the same
+high values in both groups. The strong expectation, that between-community links
+are clearly the main bridges, is therefore not confirmed: high-betweenness links
+exist within communities just as much as between them.
+
+The log scale does, however, reveal a consistent difference in the expected
+direction. On every quartile the *inter* links sit above the *intra* ones: median
+edge betweenness is about 499 for between-community links against 361 for
+within-community ones, with first and third quartiles of 149 vs 81 and 1211 vs 865.
+So between-community links do tend to carry more shortest paths, consistent with a
+bridging role, but the difference is modest (the medians differ by less than a
+factor of 1.4) and the two distributions overlap heavily.
+
+The most likely reason the gap is so small is the nature of the data. As noted in
+Community-Description, community labels come from the full proximity network, while the links
+we analyse are those of the pruned backbone. The maximum spanning tree at the core
+of the backbone turns many links into obligatory passages of the skeleton, even when
+they lie inside a community, so a large number of within-community links also act as
+structural bridges. This compresses the difference between the two types and is a
+reminder that these measures describe the backbone, not the full proximity network.
+
+#### **Between-Community Connectivity**
+
+The counts so far were global. We now return to a question left open in the previous
+sections: whether community 2 really acts as a **connective core**. We saw that it
+has the most central products but a low internal clustering, which suggested that it might be central not because its products are densely
+linked among themselves, but because they connect outwards to other communities. We
+can now test this directly, by measuring, for each community, what share of its
+links goes to *other* communities. A community with a high share of
+between-community links is relatively open and connective; one with a low share is
+more self-contained.
+
+```{r edge-inter-by-community}
+edge_comm = tibble(
+  c1   = comm[el[, 1]],
+  c2   = comm[el[, 2]],
+  type = E(g)$cross_community
+)
+
+bind_rows(
+  edge_comm |> select(community = c1, type),
+  edge_comm |> select(community = c2, type)
+) |>
+  count(community, type) |>
+  pivot_wider(names_from = type, values_from = n, values_fill = 0) |>
+  mutate(share_inter = round(inter / (inter + intra) * 100, 1)) |>
+  arrange(desc(share_inter))
+```
+
+The share of between-community links varies widely. The most outward-facing is
+community 9 (75%), which fits its status as a mixed group with no coherent sector:
+lacking an internal theme, its products connect in many directions. Communities 12,
+6 and 10 follow, with roughly half of their links going outside. At the other end,
+textiles (community 4, 5%) and electronics (community 7, 6%) are highly
+self-contained, keeping almost all their links internal.
+
+The result for community 2 (heavy machinery) is more nuanced than expected. In
+*relative* terms it is among the more closed communities: only about 14% of its
+links cross to other communities, so most of its connections stay internal. Yet in
+*absolute* terms it has the largest number of outgoing links of any community (225),
+because it is so large. So community 2 is not a connective core in the sense of
+being proportionally open; its central position comes instead from its sheer size
+and the resulting high absolute number of connections, both internal and external.
+This refines, and partly corrects, the reading suggested by its low internal
+clustering: that low clustering reflects the community's size and internal diversity
+more than an unusually outward orientation.
+
+These shares must be read with care, however. A large community such as community 2
+covers nearly a third of all products, so by size alone a higher fraction of its
+links is expected to fall inside it, regardless of any real tendency to be closed.
+The percentages therefore partly reflect community size, not only structure: large
+communities tend to look more self-contained and small ones more open as an artefact
+of their size. Assessing whether a community is genuinely more or less closed than
+its size alone would imply requires comparing the observed shares with those expected
+under a suitable random reference, which we leave to the modelling part.
+
+## **Network Visualization**
+
+So far we have described the network through numbers. We now visualize it, to make
+its structure directly visible. The dataset provides 
+*canonical coordinates*, the
+official Product Space layout, in which related products are placed close together,
+so we do not need a force-directed algorithm (which on 866 nodes would tend to
+produce an unreadable "hairball"). Using the given coordinates keeps the map
+faithful to the way the Product Space is conventionally shown.
+
+We build the map in two steps: a plain version showing the structure, then a
+decorated version where colour encodes community and size encodes degree.
+
+### **Unannotated Map - Product Space Layout**
+
+We start with a plain map: every product placed at its canonical coordinates, with
+no colour or size encoding, so that only the bare structure is visible.
+
+```{r network-base, fig.width=10, fig.height=10}
+plot(g,
+     layout      = layout_xy,
+     vertex.label = NA,
+     vertex.size = 2,
+     vertex.color = "grey40",
+     edge.color  = "grey75",
+     edge.width  = 0.3,
+     main = "Product Space — Layout")
+```
+
+Even without decoration, the map already shows a clear structure: a dense central
+band where many products are closely connected, and a sparser periphery of more
+isolated products, with a few chains hanging off the edges. This is the visual
+counterpart of the global numbers found earlier, low density, large diameter, and
+long average distance, which together describe a network stretched between a
+compact core and a far-reaching periphery. The decorated versions that follow add
+community colour and node size to read this structure in more detail
+
+### **Annotaded Map - Communities and Centrality**
+
+We now decorate the map. Node colour encodes the community (using the official
+Product Space colours, whose sectors we labelled in Section 2.2), node size
+encodes degree (so hubs stand out), and edge **thickness** uses `width_layout`. As
+explained earlier, `width_layout` is a drawing-only attribute: we use it here solely
+for the visual thickness of the links, never in any computation. A legend maps each
+colour to the sector label we gave its community.
+
+```{r network-decorated, fig.width=13, fig.height=10}
+V(g)$plot_size = 1.5 + 3 * sqrt(V(g)$degree) / max(sqrt(V(g)$degree))
+
+comm_palette = c("#0576a6", "#299fff", "#330000", "#33cc00", "#6e451e",
+                  "#730049", "#99ffff", "#9c219c", "#9c9a87", "#bf8845",
+                  "#d1ff00", "#ff0000")
+comm_labels = c("1 – Precision instruments & luxury",
+                 "2 – Heavy machinery & metalworking",
+                 "3 – Raw minerals & metals",
+                 "4 – Textiles & apparel",
+                 "5 – Light consumer goods",
+                 "6 – Agri-food & basic chemicals",
+                 "7 – Electronics & precision machinery",
+                 "8 – Fine & specialty chemicals",
+                 "9 – Mixed goods",
+                 "10 – Fresh agri & tobacco",
+                 "11 – Livestock & fishing",
+                 "12 – Paper, wood & construction")
+
+par(mar = c(2, 2, 3, 12), xpd = TRUE)
+
+plot(g,
+     layout      = layout_xy,
+     vertex.label = NA,
+     vertex.size = V(g)$plot_size,
+     vertex.color = V(g)$color,
+     vertex.frame.color = NA,
+     edge.color  = "grey75",
+     edge.width  = E(g)$width_layout * 0.4,
+     main = "Product Space — Communities and Centrality")
+
+legend(x = 1.15, y = 1,
+       legend = comm_labels,
+       fill   = comm_palette,
+       cex    = 0.7,
+       bty    = "n",
+       title  = "Communities (sectors)",
+       title.adj = 0)
+```
+
+With colour, size and a sector legend, the map ties together what the numerical
+analysis found. Three features stand out.
+
+First, **the communities form distinct spatial regions** rather than being mixed:
+electronics (cyan) in the upper left, heavy machinery (blue) across the centre,
+fine chemicals (purple) in the lower left, agri-food and paper/construction (dark
+red and red) in the centre-right, textiles (green) on the right, and livestock and
+fishing (yellow) in the upper right. Products that the dataset assigns to the same
+community are also placed close together and densely linked; it is the visual counterpart
+of the high within-community transitivity measured before.
+
+Second, **the network has a core–periphery organisation**. A dense central band
+holds most of the large, highly connected products, while the periphery thins out
+into scattered products and chains hanging off the edges (the dark raw-minerals and
+brown fresh-agri groups at the bottom). This matches the global numbers: a low
+density with a large diameter and long average distance describe a network stretched
+between a compact core and a far-reaching periphery.
+
+Third, **the hubs sit at the centre, inside the heavy-machinery community**. The
+largest nodes lie in the blue region, consistent with the centrality results, where
+the most central products belonged to community 2. This community also borders
+almost every other one, while groups such as raw minerals and fresh agriculture sit
+at the periphery, connected through fewer links, the spatial counterpart of
+community 2's high centrality. At the same time, the map makes visible what the
+clustering and edge analyses found: community 2 occupies the centre and spreads
+widely rather than forming a tight, self-contained block; its products are numerous
+and centrally placed, but loosely knit among themselves.
+
+The map thus offers a single visual summary of the whole descriptive analysis: a
+sector-structured network with a heavy-machinery core that borders most other
+sectors, a sparse periphery, and hubs concentrated at the centre.
+
+### **Locating the Pure Bridges**
+
+The map so far shows the overall structure. We now use it to verify a specific
+finding from the centrality analysis. In **Centrality** Section we identified three "pure
+bridges": products with very high betweenness but very low degree (electrical
+machinery parts, aircraft engines, and dried potatoes). Their high betweenness
+suggested that they lie on the routes between otherwise separated parts of the
+network, despite having few connections. The map lets us check this directly: if
+these products really act as bridges, they should sit at points of passage rather
+than buried inside a single dense region. We highlight them with black rings.
+
+```{r network-bridges, fig.width=13, fig.height=10}
+bridge_ids = c(123, 399, 518)
+
+V(g)$highlight_size = V(g)$plot_size
+V(g)$highlight_size[bridge_ids]  = 9
+
+V(g)$highlight_frame = NA
+V(g)$highlight_frame[bridge_ids] = "black"
+
+par(mar = c(2, 2, 3, 12), xpd = TRUE)
+
+plot(g,
+     layout      = layout_xy,
+     vertex.label = NA,
+     vertex.size = V(g)$highlight_size,
+     vertex.color = V(g)$color,
+     vertex.frame.color = V(g)$highlight_frame,
+     edge.color  = "grey80",
+     edge.width  = E(g)$width_layout * 0.3,
+     main = "Product Space - Pure bridges highlighted")
+```
+
+Their positions confirm their bridging role. None of them sits in the dense central
+core where the high-degree hubs are; instead, each lies at a point of passage. The
+electronics bridge (cyan, left) sits on the inner edge of its community, facing the
+rest of the network; the machinery bridge (blue, centre) occupies a central transit
+position despite having only three links; and the livestock bridge (yellow, upper
+right) connects a peripheral group to the rest of the network from a relatively
+isolated position. These products are important not because they are highly
+connected, but because they sit on the routes between otherwise separated parts of
+the network, exactly what high betweenness with low degree means.
