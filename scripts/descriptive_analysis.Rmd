@@ -398,17 +398,6 @@ cent_explore |>
   theme(panel.grid.minor = element_blank())
 ```
 
-```{r centrality-pairs}
-cent_explore |>
-  pivot_longer(c(closeness, betweenness, eigenvector),
-               names_to = "measure", values_to = "value") |>
-  ggplot(aes(x = degree, y = value)) +
-  geom_point(alpha = 0.4, color = "darkblue") +
-  facet_wrap(~ measure, scales = "free_y") +
-  labs(title = "Degree vs other centrality measures",
-       x = "Degree (rescaled)", y = "Other measure (rescaled)") +
-  theme_minimal()
-```
 
 The boxplots reveal four very different shapes.
 *Closeness* has the widest, most balanced spread: its values fill the upper part
@@ -420,6 +409,18 @@ maximum, so the bridging products form a sizeable group rather than a handful of
 isolated cases. *Eigenvector* is the most extreme: its box collapses onto zero and
 only a few outliers jump to the top, splitting products sharply into a near-zero
 majority and a small élite.
+
+```{r centrality-pairs}
+cent_explore |>
+  pivot_longer(c(closeness, betweenness, eigenvector),
+               names_to = "measure", values_to = "value") |>
+  ggplot(aes(x = degree, y = value)) +
+  geom_point(alpha = 0.4, color = "darkblue") +
+  facet_wrap(~ measure, scales = "free_y") +
+  labs(title = "Degree vs other centrality measures",
+       x = "Degree (rescaled)", y = "Other measure (rescaled)") +
+  theme_minimal()
+```
 
 The scatter plots against degree clarify what each measure adds. For *betweenness*,
 the points form no clear line: products with the same degree can have very
@@ -552,7 +553,7 @@ We build the visualization in two steps, following the "decorating graphs" appro
 first a plain map showing the structure, then a decorated map where colour encodes
 the product communities and size encodes importance.
 
-```{r network-base}
+```{r network-base, fig.width=10, fig.height=10}
 plot(g,
      layout = layout_xy,        
      vertex.label = NA,          
@@ -560,9 +561,9 @@ plot(g,
      vertex.color = "grey40",
      edge.color = "grey65",      
      main = "Product Space — Base Map")
-```
+````
 
-**Base map.** Using the canonical coordinates, the network already shows a clear
+Using the canonical coordinates, the network already shows a clear
 structure. There is a dense central band where many products are packed closely
 together and heavily connected (the darker area of overlapping edges), and a sparser
 periphery where products are more spread out and linked by thin chains. A few small
@@ -572,18 +573,15 @@ surrounded by more isolated ones. The map confirms visually what the numbers
 suggested earlier (low density, long distances, a few hubs), and we now add colour
 and size to read it in more detail.
 
-```{r network-decorated}
-# Decorated map: colour = official community colours, size = degree (hubs stand out)
-
-# Node size scaled from degree: sqrt keeps the largest hubs from dominating too much
+```{r network-decorated, fig.width=10, fig.height=10}
 V(g)$plot_size = 1.5 + 3 * sqrt(V(g)$degree) / max(sqrt(V(g)$degree))
 
 plot(g,
      layout = layout_xy,
      vertex.label = NA,
      vertex.size = V(g)$plot_size,
-     vertex.color = V(g)$color,     # official Product Space community colours
-     vertex.frame.color = NA,       # no border around nodes, cleaner look
+     vertex.color = V(g)$color,
+     vertex.frame.color = NA,
      edge.color = "grey65",
      edge.width = 0.3,
      main = "Product Space — Communities and Hubs")
