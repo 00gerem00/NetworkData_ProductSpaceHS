@@ -968,3 +968,22 @@ right) connects a peripheral group to the rest of the network from a relatively
 isolated position. These products are important not because they are highly
 connected, but because they sit on the routes between otherwise separated parts of
 the network, exactly what high betweenness with low degree means.
+
+## **Partial Conclusions**
+
+ajanahn
+
+> Note: we save the enriched graph obtained through the section `02_descriptive_analysis.Rmd` that will be used for the `modelling.Rmd` part.
+
+```{r graph-check}
+vertex_attr_names(g)
+edge_attr_names(g)
+
+g = delete_vertex_attr(g, "plot_size")
+g = delete_vertex_attr(g, "highlight_size")
+g = delete_vertex_attr(g, "highlight_frame")
+```
+
+```{r saved-enriched-graph}
+saveRDS(g, here("data", "processed", "product_space_enriched.rds"))
+```
