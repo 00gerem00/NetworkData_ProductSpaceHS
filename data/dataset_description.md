@@ -77,10 +77,12 @@ our own community detection.
 
 1. **`width` and `size` are layout-only and non-linear.** The official docs state
    both are "not linearly connected to its strength / market share" and "should
-   be used exclusively for layout purposes." Consequently, the edge `width` is
-   **not** the true proximity φ and cannot be converted back to it. It is retained 
-   strictly as a visual cue (`width_layout`) to reproduce the canonical maps. The 
-   network is strictly treated as **unweighted** in all computations.
+   be used exclusively for layout purposes." The edge `width` is a **continuous**
+   value (spanning roughly 1 to 4, with most edges near 1.5), but being a non-linear,
+   layout-only quantity it is **not** the true proximity φ and cannot be converted
+   back to it. It is retained strictly as a visual cue (`width_layout`) to reproduce
+   the canonical maps. The network is strictly treated as **unweighted** in all
+   computations.
 
 2. **Mislabelled columns (HS vs SITC headers).** Headers follow the SITC layout,
    but this is the HS file. So the column named `leamer` actually holds the **product name**, and the column named `name` actually holds the **hex colour / community**. The cleaning pipeline corrects this.

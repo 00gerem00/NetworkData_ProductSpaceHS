@@ -243,11 +243,25 @@ head(igraph::as_data_frame(g, what = "vertices"))
 
 ### **A note on the edge weight**
 
+### **A note on the edge weight**
+
 The graph reports `Weighted: FALSE`.
 
-The dataset provides a `width` value for edges (ranging from 1 to 4), which represents the **drawing thickness** of the edge in the original Atlas visualization. The official documentation describes this attribute as non-linear and meant for layout purposes only. It is not the underlying proximity score $\varphi$ and cannot be converted back to it. Concretely, an edge with a width of 4 does not mean it represents a connection four times stronger than a width of 1; the number only preserves a visual ranking.
+The dataset provides a `width` value for edges — a **continuous** quantity spanning
+roughly 1 to 4 (with most values concentrated near 1.5 and only a few reaching the
+upper end), which represents the **drawing thickness** of the edge in the original
+Atlas visualization. The official documentation describes this attribute as non-linear
+and meant for layout purposes only. It is not the underlying proximity score $\varphi$
+and cannot be converted back to it. Concretely, an edge with a width of 4 does not
+represent a connection four times stronger than one of width 1; the value only
+preserves a rough visual ranking, through a non-linear transformation that is not
+recoverable.
 
-Because of this, our methodological choice is deliberate: we treat the network as strictly unweighted in all analyses, dropping the standard igraph `weight` attribute entirely to avoid accidental usage in routing or centrality algorithms. We retain these thickness values solely under the custom width_layout attribute, accessing them exclusively when scaling the links to draw the canonical network maps.
+Because of this, our methodological choice is deliberate: we treat the network as
+strictly unweighted in all analyses, dropping the standard igraph `weight` attribute
+entirely to avoid accidental usage in routing or centrality algorithms. We retain
+these thickness values solely under the custom `width_layout` attribute, accessing
+them exclusively when scaling the links to draw the canonical network maps.
 
 ## **Save Processed Objetcs**
 

@@ -463,7 +463,7 @@ centrality. There is no single definition of importance, so rather than pick one
 measure, we consider four standard ones, each built on a different idea, and then
 select those that are most informative for this network.
 
-- **Degree centrality** counts direct neighbours. Already studied in Section 3.2,
+- **Degree centrality** counts direct neighbours,
   here it serves as a baseline.
 - **Closeness centrality** is based on *distance*: a product is important if it is
   close, on average, to all others through short paths.
@@ -845,7 +845,7 @@ community colour and node size to read this structure in more detail
 ### **Annotaded Map - Communities and Centrality**
 
 We now decorate the map. Node colour encodes the community (using the official
-Product Space colours, whose sectors we labelled in Section 2.2), node size
+Product Space colours, whose sectors we labelled), node size
 encodes degree (so hubs stand out), and edge **thickness** uses `width_layout`. As
 explained earlier, `width_layout` is a drawing-only attribute: we use it here solely
 for the visual thickness of the links, never in any computation. A legend maps each
@@ -968,9 +968,51 @@ the network, exactly what high betweenness with low degree means.
 
 ## **Partial Conclusions**
 
-ajanahn
+The descriptive analysis has produced a consistent picture of the Product Space
+backbone. The network is sparse (density $\approx 0.0068$) yet fully connected, with a
+large diameter and an average distance of about seven steps, a structure stretched
+between a compact core and a far-reaching periphery. Its degree distribution is
+strongly heavy-tailed: most products have one or two links, while a few hubs reach
+degree 48, and a Poisson fit to the degree-frequency data gives an exponent of
+$\alpha \approx 1.33$. Clustering is moderate-to-high ($cl_T \approx 0.43$) but uneven:
+within-community transitivity ranges from 0.73 in textiles down to near zero in the
+mixed and luxury groups. Links are overwhelmingly internal — about 78% join products
+of the same community — and the twelve sectors form distinct, spatially coherent
+regions on the map.
 
-> Note: we save the enriched graph obtained through the section `02_descriptive_analysis.Rmd` that will be used for the `modelling.Rmd` part.
+Across several measures, one community stood out. Community 2 (heavy machinery) is the
+largest and most central: its products dominate the degree and closeness rankings and
+it borders almost every other group, yet its internal transitivity is only 0.27, well
+below the tightly knit smaller sectors. It is, in short, large and central without
+being internally dense: a connective region rather than a cohesive block.
+
+These findings are descriptive: they measure *what* the network looks like, but they
+cannot say *why* it looks this way, nor whether the patterns are more than the
+by-product of size and density. Three questions, in particular, are left open, and
+each is taken up in the modelling chapter:
+
+* **Is the clustering genuine, or an artefact of density?** The transitivity of 0.43
+is high in absolute terms, but only a comparison against models that share the
+network's size and density can tell us whether it is structurally significant. The
+global models (Erdős–Rényi, Barabási–Albert) and a parametric bootstrap address this.
+
+* **Is community 2 genuinely self-contained, or does its apparent closure merely
+reflect its size?** A large community accumulates internal links by size alone; only
+by normalising against the number of *possible* connections can we judge its true
+internal density. The stochastic blockmodel resolves this.
+
+* **Does the degree exponent reflect a known generative mechanism?** The low value
+$\alpha \approx 1.33$ is best assessed against a model that produces heavy tails by
+construction — the role of Barabási–Albert.
+
+More broadly, the descriptive analysis raises the central modelling question: the
+sectors are clearly a strong organising principle, but *how much* of the network's
+structure do they actually explain? The next chapter answers this by fitting a
+sequence of models of increasing resolution, from global mechanisms that ignore the
+communities to models that estimate connection rates within and between them, and
+finally to a model that tries to recover the communities from the topology alone.
+
+> Note: we save the enriched graph obtained through the section `02_descriptive_analysis.Rmd` that will be used for the `03_network_modelling.Rmd` part.
 
 ```{r graph-check}
 vertex_attr_names(g)
