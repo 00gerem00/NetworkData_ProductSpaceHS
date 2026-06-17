@@ -382,9 +382,7 @@ itself, make an edge more likely?
 ## **Exponential Random Graph Model (ERGM)**
 
 We begin with the exponential random graph model. An ERGM expresses the probability
-of the whole network through a set of summary statistics; by choosing a statistic
-that counts within-community edges, we can test directly whether community membership
-drives edge formation.
+of the whole network through a set of summary statistics; by choosing a statistic that counts within-community edges, we can test directly whether community membership drives edge formation. This is the first conditional step on the axis introduced above: we move from a single, global edge probability (Erdős–Rényi) to two: one for within-sector pairs, one for between-sector pairs.
 
 ### **The Model**
 
@@ -454,6 +452,16 @@ summary(m1)
 summary(m2)
 ```
 
+```{r ergm-comparison-table}
+tibble(
+  Model = c("Baseline (edges)", "Homophily (edges + nodematch)"),
+  `Edges coefficient` = c(coef(m1)["edges"], coef(m2)["edges"]),
+  `Nodematch coefficient` = c(NA, coef(m2)["nodematch.community_ref"]),
+  AIC = c(AIC(m1), AIC(m2))
+) |>
+  knitr::kable(digits = 3)
+```
+
 Note that both models are estimated by maximum pseudolikelihood, not MCMC: this is the practical confirmation that dyad-independent terms admit exact estimation, with none of the Monte Carlo machinery the general case requires.
 
 The coefficients are read on the log-odds (logit) scale, so we convert them to
@@ -491,6 +499,24 @@ On the odds scale the homophily coefficient has a direct multiplicative reading:
 a between-sector edge. Sharing a community multiplies the propensity to connect by
 roughly twenty-two.
 
+```{r ergm-prob-plot}
+tibble(
+  pair = c("Different sector", "Same sector"),
+  probability = c(plogis(-6.34135), plogis(-6.34135 + 3.08996))
+) |>
+  ggplot(aes(x = pair, y = probability, fill = pair)) +
+  geom_col(width = 0.6, show.legend = FALSE) +
+  geom_text(aes(label = scales::number(probability, accuracy = 0.0001)),
+            vjust = -0.5, size = 4) +
+  scale_fill_manual(values = c("Different sector" = "steelblue",
+                               "Same sector" = "firebrick")) +
+  labs(title = "Edge probability implied by the homophily model",
+       subtitle = "Within-sector edges are ~22× more likely (on the odds scale)",
+       x = NULL, y = "Probability of an edge") +
+  theme_minimal() +
+  theme(panel.grid.major.x = element_blank())
+```
+
 The interpretation is unambiguous. The homophily coefficient is large and decisively
 significant ($\delta = 3.09$, $z = 64.5$, $p < 0.001$): community membership is a
 powerful predictor of edge formation. This is the formal counterpart of the
@@ -506,7 +532,7 @@ capabilities, they need not be equally cohesive, and homophily, as specified her
 ### **Why We Stop at Dyad-Independent Terms**
 
 The homophily model captures *who* connects to whom at the sector level, but not
-*clustering*; the tendency to form triangles that the global models failed to
+*clustering*, the tendency to form triangles that the global models failed to
 reproduce. The natural extension would be to add a clustering statistic to the ERGM.
 
 This is where dyad-independence ends and the difficulties begin. A clustering term
@@ -526,9 +552,7 @@ where the triangle feedback is strongest. Second, the clustering is *highly
 heterogeneous* across sectors, with internal densities ranging from about 0.18 in the
 smallest communities to 0.007 in the largest. A GWESP term imposes a *single* global
 clustering parameter on the whole network; it cannot represent that some sectors are
-tightly knit while others are nearly empty inside. Asking one parameter to describe
-such uneven structure is a misspecification, exactly the situation in which structural
-ERGMs fail to converge, across decay values.
+tightly knit while others are nearly empty inside. Asking one parameter to describe such uneven structure is a misspecification, exactly the kind of situation in which structural ERGMs are known to fail to converge, regardless of the decay chosen.
 
 We therefore stop at the dyad-independent homophily term, which the ERGM estimates
 exactly and interprets cleanly. The very feature that defeats a global clustering
@@ -538,24 +562,91 @@ estimates a separate connection rate for each pair of sectors. The structure of 
 graph thus does not merely rule out structural ERGM terms; it points directly to the
 model that comes next: the stochastic blockmodel.
 
+## **Stochastic Blockmodel**
 
+The ERGM established that community membership drives connection, but only coarsely:
+it assigns one within-sector probability to all communities alike. The stochastic
+blockmodel (SBM) removes that restriction. It is the natural next step on our axis,
+from one global edge probability (Erdős–Rényi), to two (within vs. between, the
+ERGM), to a full matrix of connection rates, one for *every pair* of sectors.
 
+Following the course notation, the SBM is a generative model in which each vertex
+belongs to one of $Q$ groups $C_1, \dots, C_Q,$ with $\alpha_q$ the probability of
+belonging to group $q,$ and a pair of vertices $i \in C_q$, $j \in C_r$ is connected
+with probability $\pi_{qr}$:
 
+$$
+P[\{i,j\} \in E \mid i \in C_q,\, j \in C_r] = \pi_{qr}.
+$$
 
+The matrix $\pi$ is the heart of the model. Its diagonal entries $\pi_{qq}$ are the
+*within-sector* connection rates; its off-diagonal entries $\pi_{qr}$ ($q \neq r$) the
+*between-sector* rates. Writing $z_{iq} = \mathbb{1}\{i \in C_q\}$ for the group
+membership, the log-likelihood takes the form given in the course,
 
-# **STOCAZZI BLOCKMODEL**
+$$
+\ell(\alpha, \pi; A, Z) = \sum_{i<j} \sum_{r,s} z_{ir} z_{js}\, b(A_{ij}, \pi_{rs})
++ \sum_i \sum_q z_{iq} \log \alpha_q,
+\qquad b(a, \pi) = a \log \pi + (1-a)\log(1-\pi),
+$$
 
+where $b(\cdot)$ is simply the Bernoulli log-likelihood of an edge. This single
+expression organises the whole section, because it can be used in two regimes that
+differ only in whether the memberships $Z$ are known:
 
+* **Known blocks.** If we *take* the 12 official sectors as the groups, $Z$ is
+observed and the model reduces to estimating each $\pi_{qr}$ directly, the proportion
+of realised edges among all possible pairs in each block. This refines the ERGM from
+two probabilities to a full $12 \times 12$ matrix, and lets us revisit which sectors
+are genuinely cohesive.
 
+* **Latent blocks.** If instead we treat $Z$ as *unknown* and infer it from the
+topology, the same likelihood must be maximised over both $\pi$ and $Z$. This is
+intractable directly, so it is fitted by variational EM; we then ask whether the groups discovered from structure alone recover the
+official sectors.
+
+We take these in turn. Throughout, it helps to keep in mind what $\pi_{qr}$ means
+economically. An edge encodes co-export proximity (shared productive capabilities)
+so $\pi_{qq}$ measures how uniformly the products of a sector draw on the *same*
+capabilities, while $\pi_{qr}$ measures how much two different sectors share. A dense
+diagonal block is a technologically coherent sector; a sparse one is an internally
+diverse aggregate; strong off-diagonal entries mark pairs of sectors built on related
+capabilities. The blockmodel, in other words, does not just describe wiring: it maps
+the capability structure of the economy.
+
+### **Known Blocks: The 12 Sectors**
+
+We begin with the case where the blocks are *given*: we take the 12 official sectors
+as fixed groups, so the membership $Z$ is observed rather than inferred. The
+likelihood then separates across blocks, and each connection rate is estimated
+directly by its maximum-likelihood value, the observed proportion of edges among all
+possible pairs in that block:
+
+$$
+\hat{\pi}_{qr} = \frac{e_{qr}}{n_{qr}},
+$$
+
+where $e_{qr}$ is the number of edges between sectors $q$ and $r$ and $n_{qr}$ the
+number of possible such pairs. For an off-diagonal block this is $n_{qr} = n_q\, n_r$;
+for a diagonal (within-sector) block it is $n_{qq} = \binom{n_q}{2}$, the number of
+distinct pairs inside the sector.
+
+Dividing by the number of *possible* pairs is what makes this estimate meaningful: it
+corrects for sector size. The descriptive analysis showed that sector 2 holds the
+most internal edges in absolute terms, but it is also by far the largest sector, so
+it has many more possible pairs to fill. Only by normalising can we ask the right
+question — not *how many* internal links a sector has, but how *densely* its products
+are interconnected. This is precisely the size effect left open earlier, which the
+$\hat{\pi}_{qq}$ now lets us resolve.
 
 ```{r blockmodel-known}
-comm = V(g)$community_ref
+comm = igraph::V(g)$community_ref
 
 n_q = as_tibble(table(comm)) |>
   rename(community = comm, size = n) |>
-  mutate(community = as.integer(community))   # <- fix: keep integer
+  mutate(community = as.integer(community)) 
 
-el = as_edgelist(g, names = FALSE)
+el = igraph::as_edgelist(g, names = FALSE)
 
 edge_counts = tibble(
   q = pmin(comm[el[, 1]], comm[el[, 2]]),
@@ -579,10 +670,7 @@ block_tbl = pairs_tbl |>
     type   = if_else(q == r, "intra", "inter")
   ) |>
   select(q, r, type, edges, possible, pi_hat)
-
-block_tbl
 ```
-
 
 ```{r blockmodel-intra}
 block_tbl |>
@@ -591,7 +679,6 @@ block_tbl |>
   arrange(desc(pi_hat)) |>
   select(community = q, size, edges, pi_hat)
 ```
-
 
 ```{r blockmodel-summary}
 block_tbl |>
@@ -603,26 +690,85 @@ block_tbl |>
   )
 ```
 
+```{r blockmodel-heatmap}
+heat_tbl = block_tbl |>
+  bind_rows(
+    block_tbl |> filter(q != r) |> rename(q = r, r = q)
+  )
 
-```{r blockmodel-check}
-# Total edges across all blocks must equal the network's edge count
-sum(block_tbl$edges)        # should be 2532
-ecount(g)                   # 2532
-
-# Intra vs inter totals must match Section 3.5.1 (1966 intra, 566 inter)
-block_tbl |>
-  group_by(type) |>
-  summarise(total_edges = sum(edges))
+ggplot(heat_tbl, aes(x = factor(q), y = factor(r), fill = pi_hat)) +
+  geom_tile(color = "white", linewidth = 0.5) +
+  geom_text(aes(label = ifelse(q == r | pi_hat > 0.004, sprintf("%.3f", pi_hat), "")),
+            size = 2.7) +
+  scale_fill_gradient(low = "white", high = "purple", name = expression(hat(pi))) +
+  scale_y_discrete(limits = rev) +
+  labs(title = "Block connection rates between the 12 sectors",
+       subtitle = "Diagonal = within-sector density; off-diagonal = between-sector",
+       x = "Sector", y = "Sector") +
+  coord_fixed() +
+  theme_minimal() +
+  theme(panel.grid = element_blank())
 ```
 
+The heatmap shows a clear assortative structure: the diagonal dominates, while almost
+all off-diagonal cells are near-white. The full $12 \times 12$ matrix refines the
+ERGM's two probabilities into block-specific rates, but the overall message is
+consistent, connections form overwhelmingly within sectors. On average the
+within-sector rate ($\bar{\pi}_{qq} = 0.083$) is about 26 times the between-sector
+rate ($\bar{\pi}_{qr} = 0.0032$).
+
+The diagonal, however, is far from uniform, and this is what the ERGM could not
+show. Internal density ranges from 0.178 in sector 12 down to 0.007 in sector 9, a
+spread of more than twenty-fold. The single within-sector probability the ERGM
+estimated (0.037) was an average over these very different values; the blockmodel
+reveals the heterogeneity it hid.
+
+This resolves the question left open in the descriptive analysis. Sector 2 holds the
+most internal edges in absolute terms (665), yet its internal density is only 0.021,
+among the *lowest* of all sectors, and clearly pale on the diagonal of the heatmap
+despite being by far the largest block (252 products). Its apparent cohesion was a
+size effect: with so many products, it accumulates many internal edges while remaining
+internally sparse. This agrees with its low internal transitivity found earlier, and
+settles the matter: sector 2 is large and central, but not internally dense.
+
+A striking regularity underlies this: internal density falls as sector size grows. The
+smallest sectors (12, 6, 10, with 27–43 products) are the densest (0.15–0.18); the
+largest (2, 11, 8, with 90–252) are among the sparsest (0.02–0.04). Recalling that an
+edge encodes shared productive capabilities, this has a natural economic reading. A
+small, dense sector groups products that draw on the *same* capabilities (textiles,
+or paper and construction) so the countries competitive in one are competitive in
+most, and internal proximity is high. A large, sparse sector such as heavy machinery
+(sector 2) aggregates technologically diverse products (bearings, vehicles, engines)
+that demand *different* capabilities; few countries are competitive across all of
+them, so internal proximity stays low despite the sector's size. Sector 2 is central
+to the Product Space not as a tight cluster but as a large, heterogeneous hub. We
+offer this reading with the usual caution: the network captures co-export proximity on
+a pruned backbone, not direct economic causation.
+
+### **Latent Blocks: Variational EM**
+
+We now reverse the logic. Instead of taking the 12 sectors as given, we treat the
+block memberships $Z$ as *unknown* and infer them from the topology alone. The model
+is the same SBM as before, with the same likelihood, but now both the connection
+matrix $\pi$ *and* the memberships $Z$ must be estimated. The question changes
+accordingly: not "how do the official sectors connect?", but "if we did not know the
+sectors, would the network's structure recover them?"
+
+The difficulty is that the likelihood now sums over all possible assignments of nodes
+to blocks, a number that grows as $Q^{n}$ and is intractable for any real network.
+The standard solution, which the course follows, is **variational EM** (Daudin,
+Picard & Robin, 2008): it replaces the intractable likelihood with a tractable
+*mean-field* approximation and alternates two steps until convergence, an E-step that
+estimates, for each node, its probability of belonging to each block, and an M-step
+that re-estimates $\pi$ given those memberships. The number of blocks $Q$ is itself
+selected by the Integrated Completed Likelihood (ICL), which balances fit against
+complexity.
 
 ```{r sbm-variational}
 library(sbm)
 
-# SBM works on the adjacency matrix
-A = as_adjacency_matrix(g, sparse = FALSE)
+A = igraph::as_adjacency_matrix(g, sparse = FALSE)
 
-# Estimate the SBM: the algorithm discovers the blocks and probabilities
 set.seed(SEED)
 sbm_fit = estimateSimpleSBM(
   A,
@@ -631,47 +777,184 @@ sbm_fit = estimateSimpleSBM(
 )
 ```
 
-
-```{r}
-# Quanti blocchi ha selezionato l'ICL?
-sbm_fit$nbBlocks
-
-# La matrice delle probabilità tra blocchi
-round(coef(sbm_fit)$mean, 4)
-
-# Le dimensioni dei blocchi trovati
-table(sbm_fit$memberships)
+```{r sbm-pi-heatmap}
+pi_sbm = coef(sbm_fit)$mean
+colnames(pi_sbm) = seq_len(ncol(pi_sbm))
+rownames(pi_sbm) = seq_len(nrow(pi_sbm))
+pi_tbl = as_tibble(as.table(pi_sbm), .name_repair = ~ c("block_q", "block_r", "pi")) |>
+  mutate(
+    block_q = factor(block_q, levels = as.character(seq_len(nrow(pi_sbm)))),
+    block_r = factor(block_r, levels = as.character(seq_len(nrow(pi_sbm))))
+  )
+ggplot(pi_tbl, aes(x = block_q, y = block_r, fill = pi)) +
+  geom_tile(color = "white", linewidth = 0.5) +
+  geom_text(aes(label = ifelse(pi >= 0.005, sprintf("%.3f", pi), "")), size = 2.5) +
+  scale_fill_gradient(low = "white", high = "purple", name = expression(hat(pi))) +
+  scale_y_discrete(limits = rev) +
+  labs(title = "Connection rates between SBM-Discovered Blocks",
+       x = "Block", y = "Block") +
+  coord_fixed() +
+  theme_minimal() +
+  theme(panel.grid = element_blank())
 ```
 
+The variational EM selects **ten blocks**. The number is chosen by the Integrated
+Completed Likelihood, which balances how well the model fits against how many blocks
+it uses, so ten is not imposed but the resolution the data themselves prefer, close
+to, yet deliberately distinct from, the twelve official sectors. That the topology
+settles on a number so near twelve is already telling: left free to choose, it finds a
+granularity close to the administrative one, but not identical to it.
 
-```{r sbm-comparison}
-tibble(
-  official = factor(V(g)$community_ref),
+The matrix makes the nature of these blocks clear, and it separates them into two
+sharply different kinds. Nine are genuine communities: internally dense, with
+within-block connection rates running from 0.77 in the tightest down to about 0.05,
+and largely disconnected from one another (most off-diagonal rates are near zero). A
+few exceptions stand out (blocks 1 and 3 connect at a rate of 0.30, blocks 4 and 5 at
+0.08) marking the rare pairs of groups the model sees as genuinely related rather
+than separate. These nine blocks are the organised, modular heart of the network.
+
+The tenth block is something else entirely. It gathers **521 products (more than
+half the entire network) into a single group whose internal density is just 0.003**,
+two orders of magnitude below the others. This is not a community but a *residual*: it
+absorbs the low-degree, peripheral products that the backbone leaves only loosely
+attached, products that share no dense neighbourhood and therefore cannot be assigned
+to any cohesive block. Its near-empty diagonal and its sheer size are the signature of
+a periphery, not a sector.
+
+What the model has recovered, then, is precisely the **core–periphery architecture**
+that surfaced at every earlier stage of the analysis, but here it emerges
+*endogenously*, from the topology alone, without being assumed. A dense, structured
+core of nine modular groups sits embedded in a vast, amorphous periphery of weakly
+connected products. The descriptive analysis suggested this shape through degree and
+centrality; the latent blockmodel now confirms it as the network's fundamental
+organising form.
+
+```{r sbm-tile-plot}
+contingency = tibble(
+  official = factor(igraph::V(g)$community_ref),
   sbm      = factor(sbm_fit$memberships)
 ) |>
-  count(official, sbm) |>
-  pivot_wider(names_from = sbm, values_from = n, values_fill = 0)
+  count(official, sbm)
+
+ggplot(contingency, aes(x = official, y = sbm, fill = n)) +
+  geom_tile(color = "white", linewidth = 0.5) +
+  geom_text(aes(label = ifelse(n > 0, n, "")), size = 3) +
+  scale_fill_gradient(low = "white", high = "purple", name = "Products") +
+  labs(title = "Official sectors vs. SBM-discovered blocks",
+       subtitle = "How the 10 latent blocks map onto the 12 official sectors",
+       x = "Official sector", y = "SBM block") +
+  theme_minimal() +
+  theme(panel.grid = element_blank())
 ```
 
+The tile plot reads the discovered blocks against the official sectors, and the
+comparison is revealing precisely because the match is *partial*. When the topology is
+free to redraw the groups, the twelve administrative sectors do not survive intact:
+each one is either confirmed, merged, fragmented, or dissolved, and which of these
+fates befalls it is itself the result.
+
+A few sectors are **recovered as coherent groups**. Textiles (sector 4) split cleanly
+into two dense blocks (32 and 21 products) with almost nothing left in the residual, 
+the topology agrees that these products form tight communities, even refining the
+official sector into two sub-groups. Electronics and chemicals (sectors 7 and 8)
+behave differently but just as informatively: they are *merged*, both flowing into the
+same block (24 and 40 products), which means the network cannot tell them apart:
+their products are so densely co-exported across the two labels that they form one
+structural community, not two.
+
+Other sectors **dissolve**. The smaller, less cohesive ones (sectors 1, 5 and 9) are
+absorbed almost wholesale into the residual block (19, 22 and 49 of their products
+respectively), leaving little or nothing in any structured block. Their products are
+too peripheral, too weakly connected, to constitute a community the model can see; as
+groups, they exist in the official classification but not in the topology.
+
+The most striking case is **heavy machinery (sector 2)**. Rather than forming a block
+of its own, its 252 products *scatter* across five different blocks  (83 into one, 23
+into another, then 11, 10, 8) with the remainder falling into the residual. The
+largest and most central sector in the entire network is not recognised as a single
+community at all; the variational EM decomposes it into the smaller coherent
+sub-groups hidden inside it and discards the rest to the periphery. This is the same
+internal heterogeneity the known-block model exposed through its low density (0.021),
+now shown from the opposite direction: not "this sector is internally sparse", but
+"this sector is not one group, it is several, plus noise". The two models, one
+assuming the sectors and one ignoring them, describe the same object from both sides.
+
+### **What the Models Tell Us Together**
+
+We set out not to find the single "correct" model of the Product Space, but to ask how
+much structure is needed to explain it. We approached this from two directions. First,
+two global models that ignore the sectors entirely, Erdős–Rényi, which places edges
+at random, and Barabási–Albert, which grows the network by preferential attachment,
+to establish what the network has beyond randomness and degree. Then a sequence of
+community-level models that estimate the same quantity, the probability of an edge, at
+increasing resolution: one rate distinguishing within- from between-sector (the ERGM),
+a full matrix over the known sectors (the blockmodel), and finally a matrix over groups
+discovered from the topology alone (the latent SBM). Read together, they converge on
+one coherent picture, and the answer to our question is unambiguous: global mechanisms
+are not enough, the sector structure is essential, yet even the sectors do not tell
+the whole story.
+
+The global models fail, but informatively. Erdős–Rényi misses everything — neither the
+hubs nor the clustering. Barabási–Albert does better on one axis: its
+preferential-attachment mechanism reproduces the heavy degree tail almost as well as
+the data, so the degree distribution is *not* where the network's structure hides. Yet
+on clustering it fails just as decisively as Erdős–Rényi — the parametric bootstrap
+places the observed transitivity hundreds of standard deviations beyond either null
+model. This isolates the finding: what the global models cannot reproduce is not the
+degree sequence but the *clustering*, and that clustering is the imprint of the
+sectors. The ERGM confirms it formally — sharing a sector multiplies the odds of an
+edge roughly twenty-two-fold. But the sectors are not uniform. The known-block model
+shows their internal density ranging from 0.18 down to 0.007, and the latent model,
+free to redraw the groups, recovers the specialised sectors cleanly while fragmenting
+or dissolving the large, diverse ones. All four analyses — clustering, centrality, and
+the two blockmodels — return the same verdict on the largest and most central sector,
+heavy machinery: internally loose, a hub of distinct manufacturing capabilities rather
+than a single tight cluster. That four methods, with entirely different assumptions,
+agree on this is the strongest evidence the analysis offers.
+
+This picture makes sense only in light of what the network *is*. The Product Space is
+a pruned backbone of co-export proximities: an edge marks two products that the same
+countries competitively export, a proxy for shared productive capabilities. Read this
+way, the structural results map onto the capability structure of the global economy.
+Specialised sectors — textiles, agriculture — are tightly knit because their products
+rest on the same skills, infrastructure and institutions, so the countries that master
+one master the others, and the latent model recovers them as clean blocks. Large
+aggregates such as machinery are internally loose because they bundle products built
+on different capabilities, which few countries command all at once — so no single
+dense core exists for the model to find, and the sector fragments. The core–periphery
+shape that every stage of the analysis returned — a structured core of coherent
+sectors surrounded by a periphery of weakly connected products — is the topological
+echo of a familiar economic logic: economies grow outward from the capabilities they
+already possess, and the strongest of those relationships are exactly the ones the
+backbone retains.
+
+Before drawing the threads together, one theoretical trade-off deserves note. In
+moving from the Barabási–Albert baseline to the community-level models, we traded one
+structural focus for another. Barabási–Albert captured degree heterogeneity (the hubs) but was blind to community boundaries. The ERGM and the standard blockmodel do the
+opposite: they capture sectoral boundaries and measure intra- versus inter-group
+attraction, but they treat all products within a block as stochastically equivalent,
+abstracting away the very degree heterogeneity that Barabási–Albert reproduced.
+Capturing both at once (group structure *and* node-level heterogeneity) would require
+a richer specification such as a degree-corrected blockmodel. We do not pursue it here:
+on a pruned backbone it would inherit the same structural limits, and isolating the
+community effect is what answers our question.
+
+That scope is the limit we have respected throughout. Because the network is a
+backbone, a maximum spanning tree plus the proximities above a high threshold, it
+keeps only the strongest links and leaves many products with very few connections.
+This is why the latent model gathers more than half the nodes into a single near-empty
+residual block: the periphery is not noise, but it is partly a consequence of pruning,
+and the partial recovery of the sectors must be read as a statement about this
+co-export backbone, not about the full proximity matrix or direct economic causation.
+
+Within that scope, however, the conclusion is firm and consistent across
+four independent analyses: the Product Space is organised by sector, but unevenly.
+Its structure is strong and recoverable where capabilities are specialised and shared,
+and faint where they are diverse and dispersed. How much structure is needed to
+explain the network? More than randomness, more than degree, and more than a single
+uniform notion of community, exactly as much as its real, heterogeneous division into
+productive sectors.
 
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-Before concluding this section, it is crucial to acknowledge a fundamental theoretical trade-off shared by both the homophily ERGM and the standard Stochastic Blockmodel we just fitted. By moving from the Barabási–Albert baseline to these community-level models, we traded one structural focus for another. The BA model successfully captured degree heterogeneity (hubs) but remained blind to community boundaries. Conversely, our ERGM and standard SBM explicitly capture sectoral boundaries and measure intra/inter-group attraction, but they assume uniform connection probabilities within those blocks, effectively ignoring the heavy-tailed degree distribution. Capturing both phenomena simultaneously would require more complex model specifications capable of jointly handling group-level probabilities and individual node heterogeneity, which falls beyond the scope of our analysis. Nonetheless, isolating the community effect demonstrates mathematically what the global models lacked: sectoral homophily is a primary generative driver of the Product Space topology.
