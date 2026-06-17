@@ -588,12 +588,12 @@ The three measures are now part of the network object. We build a table and look
 the most central products under each of the two selected measures.
 
 ```{r centrality-tables}
-cent_tbl <- tibble(
+cent_tbl = tibble(
   product       = V(g)$product,
   community_ref = V(g)$community_ref,
   degree        = V(g)$degree,
   betweenness   = V(g)$betweenness,
-  closeness     = V(g)$closeness
+  closeness     = V(g)$closeness,
 )
 ```
 

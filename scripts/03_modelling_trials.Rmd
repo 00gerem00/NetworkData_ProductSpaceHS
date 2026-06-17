@@ -216,6 +216,8 @@ the high transitivity, which is the signature of products grouping into densely
 connected sectors. This is exactly the feature that a model with explicit community
 structure should capture, and it motivates the community-level models that follow.
 
+
+
 ```{r er-bootstrap}
 set.seed(SEED)
 B = 500  # number of simulated networks
@@ -286,3 +288,111 @@ not reproduce the second. Both null models are therefore rejected on clustering,
 margins so large that randomness and preferential attachment can be ruled out as the
 sole organising principles of the Product Space.
 
+
+
+
+
+```{r blockmodel-known}
+comm = V(g)$community_ref
+
+n_q = as_tibble(table(comm)) |>
+  rename(community = comm, size = n) |>
+  mutate(community = as.integer(community))   # <- fix: keep integer
+
+el = as_edgelist(g, names = FALSE)
+
+edge_counts = tibble(
+  q = pmin(comm[el[, 1]], comm[el[, 2]]),
+  r = pmax(comm[el[, 1]], comm[el[, 2]])
+) |>
+  count(q, r, name = "edges")
+
+pairs_tbl = expand_grid(q = sort(unique(comm)), r = sort(unique(comm))) |>
+  filter(q <= r) |>
+  left_join(n_q |> rename(q = community, n_q = size), by = "q") |>
+  left_join(n_q |> rename(r = community, n_r = size), by = "r") |>
+  mutate(
+    possible = if_else(q == r, choose(n_q, 2), as.numeric(n_q) * n_r)
+  )
+
+block_tbl = pairs_tbl |>
+  left_join(edge_counts, by = c("q", "r")) |>
+  mutate(
+    edges  = replace_na(edges, 0),
+    pi_hat = round(edges / possible, 4),
+    type   = if_else(q == r, "intra", "inter")
+  ) |>
+  select(q, r, type, edges, possible, pi_hat)
+
+block_tbl
+```
+
+
+```{r blockmodel-intra}
+block_tbl |>
+  filter(type == "intra") |>
+  left_join(n_q |> rename(q = community), by = "q") |>
+  arrange(desc(pi_hat)) |>
+  select(community = q, size, edges, pi_hat)
+```
+
+
+```{r blockmodel-summary}
+block_tbl |>
+  group_by(type) |>
+  summarise(
+    mean_pi   = round(mean(pi_hat), 4),
+    median_pi = round(median(pi_hat), 4),
+    max_pi    = round(max(pi_hat), 4)
+  )
+```
+
+
+```{r blockmodel-check}
+# Total edges across all blocks must equal the network's edge count
+sum(block_tbl$edges)        # should be 2532
+ecount(g)                   # 2532
+
+# Intra vs inter totals must match Section 3.5.1 (1966 intra, 566 inter)
+block_tbl |>
+  group_by(type) |>
+  summarise(total_edges = sum(edges))
+```
+
+
+```{r sbm-variational}
+library(sbm)
+
+# SBM works on the adjacency matrix
+A = as_adjacency_matrix(g, sparse = FALSE)
+
+# Estimate the SBM: the algorithm discovers the blocks and probabilities
+set.seed(SEED)
+sbm_fit = estimateSimpleSBM(
+  A,
+  model = "bernoulli",
+  estimOptions = list(verbosity = 1, plot = FALSE, exploreMax = 12)
+)
+```
+
+
+```{r}
+# Quanti blocchi ha selezionato l'ICL?
+sbm_fit$nbBlocks
+
+# La matrice delle probabilità tra blocchi
+round(coef(sbm_fit)$mean, 4)
+
+# Le dimensioni dei blocchi trovati
+table(sbm_fit$memberships)
+```
+
+
+```{r sbm-comparison}
+tibble(
+  official = factor(V(g)$community_ref),
+  sbm      = factor(sbm_fit$memberships)
+) |>
+  count(official, sbm) |>
+  pivot_wider(names_from = sbm, values_from = n, values_fill = 0)
+```

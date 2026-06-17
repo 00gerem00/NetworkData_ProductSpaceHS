@@ -1,0 +1,361 @@
+---
+title: "The Product Space (HS): Network Modelling"
+subtitle: "Statistical and Computational Methods for Network Data"
+author: "Matteo Gerevini | Beatrice Liuni | Lorenzo Meroni"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+    theme: flatly
+---
+
+# **Network Modelling**
+
+## **Setup and Data Loading**
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+
+library(here)
+library(tidyverse)
+library(igraph)
+
+g = readRDS(here("data", "processed", "product_space_enriched.rds"))
+
+SEED = 5836   
+```
+
+## **Introduction and Objectives**
+
+The descriptive analysis (`02_descriptive_analysis.Rmd`) revealed a highly organized topology: an extremely low
+density ($\approx 0.0068$) paired with a high global transitivity ($\approx 0.43$), a
+heavy-tailed degree distribution concentrated in the heavy-machinery sector
+(community 2), and a strong concentration of links within sectors (about 78% of edges
+are within-community). Descriptive statistics, however, summarize these patterns
+without explaining the mechanisms that produce them.
+
+This chapter moves from description to a formal statistical assessment. The guiding
+question is not which single model "wins", but how much structure is needed to
+explain the Product Space: can it be reproduced by simple global mechanisms, or
+does it fundamentally require the sector communities? To answer this, we fit a
+sequence of models of increasing structural resolution, all of which describe the
+same quantity, the probability that an edge exists between two products, but
+condition it on progressively more information.
+
+* **Global models (no communities)**: Erdős–Rényi assumes edges form at random;
+Barabási–Albert adds preferential attachment to generate a heavy-tailed degree
+distribution. Here the edge probability ignores the sectors entirely. These are
+baselines: they reveal what the network has *beyond* randomness and degree.
+
+* **Community-level models (communities as a variable)**: We then condition edge
+probability on the sectors. An ERGM with a homophily term tests whether sharing a
+community predicts edge formation, distinguishing only *within* from *between*
+sectors. A stochastic blockmodel on the 12 sectors refines this, estimating a
+separate connection rate for *every pair* of communities, which also lets us revisit
+the question of community openness left open in the descriptive analysis (`02_descriptive_analysis.Rmd`).
+
+* **Latent structure (communities discovered).** Finally, a stochastic blockmodel
+with *latent* blocks, fitted by variational EM, reverses the logic: instead of
+assuming the sectors, it infers groups from the topology alone, and we ask whether
+the recovered structure matches the official sectors.
+
+Together these models form a single axis,  the edge probability under increasingly
+rich assumptions, along which we can locate exactly where the structure of the
+Product Space resides.
+
+## **Global Models**
+
+Before modelling the community structure explicitly, we ask a more basic question:
+how much of the Product Space can be explained by simple, global mechanisms that
+ignore the sectors entirely? We consider two classical generative models. The
+Erdős–Rényi model assumes that edges form completely at random; the Barabási–Albert
+model assumes that the network grows by *preferential attachment*, where new products
+attach preferentially to already well-connected ones. Neither model knows anything
+about communities.
+
+Our strategy is not simply to simulate one network from each model and compare a few
+numbers. We proceed in two steps. First, we compare the global summary statistics
+(transitivity, path length, maximum degree) of a simulated network against the
+observed one. Second, we use a **parametric bootstrap**: we simulate many networks
+from the null model, build the sampling distribution of a statistic under it, and
+check whether the observed value is plausible or falls far outside its range. This
+turns an informal comparison into a formal statistical assessment.
+
+We expect both models to fail, but in informative ways: the question is *which*
+features each one can and cannot reproduce, and what that failure tells us about the
+forces shaping the network.
+
+
+### **Erdős–Rényi: The Null Model**
+
+The Erdős–Rényi (ER) model is the simplest random graph model and serves as our
+baseline. In the $G(n, p)$ formulation, a graph has $n$ vertices and each of the
+$\binom{n}{2}$ possible edges is present independently with the same probability $p$:
+
+$$
+A_{ij} \stackrel{iid}{\sim} \text{Bernoulli}(p), \quad i > j.
+$$
+
+Equivalently, in the $G(n, m)$ formulation used here, we fix the number of vertices
+$n$ and edges $m$ and distribute the $m$ edges uniformly among all possible pairs.
+We use $G(n, m)$ so that the simulated network has exactly the same size and density
+as the observed one ($n = 866$, $m = 2532$), making the comparison fair.
+
+This model produces homogeneous structure. Its degree distribution is approximately
+Poisson (for $p = O(1/n)$), with exponentially decaying tails, and its expected local
+clustering equals the edge probability, $\mathbb{E}[cl(v)] = p \approx 0.0068$, since
+neighbours are connected only by chance. Both predictions clash with what we observed
+in `02_descriptive_analysis.Rmd`: a heavy-tailed degree distribution and a high transitivity
+($cl_T(G) \approx 0.43$). The ER model therefore lets us test directly
+whether these features could arise from randomness alone, or whether they signal
+genuine structure.
+
+We simulate an ER graph of the same size as the Product Space and inspect its basic
+properties.
+
+```{r er-simulate}
+set.seed(SEED)
+ g_er = sample_gnm(n = vcount(g), m = ecount(g))
+
+c(
+  n_real = vcount(g),    n_er = vcount(g_er),
+  m_real = ecount(g),    m_er = ecount(g_er),
+  density_real = edge_density(g), density_er = edge_density(g_er)
+)
+```
+
+### **Barabási–Albert: Preferential Attachment**
+
+The Erdős–Rényi model treats all vertices identically. The Barabási–Albert (BA) model
+instead introduces heterogeneity through *growth* and *preferential attachment*.
+Unlike ER, which places edges on a fixed vertex set, BA builds the network over time:
+starting from a small seed graph, one vertex is added at a time, and each new vertex
+forms $m$ edges to existing vertices, chosen with probability proportional to their
+current degree,
+
+$$
+P(\text{new vertex attaches to } i) = \frac{d_i}{\sum_j d_j}.
+$$
+
+This "rich-get-richer" rule concentrates new links on already well-connected
+vertices. As the network grows, it produces a heavy-tailed degree distribution that
+asymptotically follows a power law,
+
+$$
+P(d) \sim d^{-\gamma}, \qquad \gamma = 3,
+$$
+
+with theoretical exponent $\gamma = 3$ in the canonical model. Preferential attachment
+is the mechanism most often invoked to explain heavy tails in real networks, so it
+directly targets the degree concentration we found in the descriptive analysis (estimated exponent
+$\alpha \approx 1.33$, `02_descriptive_analysis.Rmd`). Unlike ER, however, BA makes no provision for clustering: it
+builds hubs but not triangle-rich neighbourhoods.
+
+We simulate a BA network with $m = 3$ edges per new vertex, which yields about 2,600
+edges, close to the observed 2,532, so that the density is comparable. Note that,
+unlike $G(n, m)$, the BA model does not fix the edge count exactly, so the match is
+approximate. The question is whether reproducing the degree mechanism is enough to
+recover the rest of the structure, in particular the high clustering that
+Erdős–Rényi could not generate.
+
+```{r ba-simulate}
+set.seed(SEED)
+g_ba = sample_pa(n = vcount(g), m = 3, directed = FALSE)
+
+c(
+  n_ba = vcount(g_ba),
+  m_ba = ecount(g_ba),
+  density_ba = edge_density(g_ba)
+)
+```
+
+### **Comparison of Summary Statistics**
+
+Having simulated both null models at the size of the Product Space, we compare them
+with the observed network on three global statistics: the transitivity (clustering),
+the average path length, and the maximum degree. Each captures a different structural
+feature, so the comparison shows not just whether the models fail, but which
+aspects of the network each one can or cannot reproduce.
+
+```{r global-comparison}
+get_stats = function(graph, name) {
+  tibble(
+    Network         = name,
+    Transitivity    = transitivity(graph, type = "global"),
+    Avg_Path_Length = mean_distance(graph, weights = NA),
+    Max_Degree      = max(degree(graph))
+  )
+}
+
+bind_rows(
+  get_stats(g,    "Empirical (Product Space)"),
+  get_stats(g_er, "Erdős–Rényi"),
+  get_stats(g_ba, "Barabási–Albert")
+) |> knitr::kable(digits = 4)
+```
+
+Neither null model reproduces the structure of the Product Space, and the way each
+one fails is informative.
+
+The clearest failure is **clustering**. The empirical transitivity (0.434) is one to
+two orders of magnitude higher than both null models (0.006 for Erdős–Rényi, 0.020
+for Barabási–Albert). The Erdős–Rényi value matches its theoretical prediction
+($cl_T \approx p \approx 0.007$): in a random graph, neighbours are connected only by
+chance, so almost no triangles form. Barabási–Albert, despite its hubs, produces
+almost no clustering either. The high transitivity of the Product Space therefore
+cannot arise from randomness or preferential attachment alone.
+
+The **maximum degree** is more nuanced. The empirical network reaches 48. Erdős–Rényi
+underestimates this sharply (16), as expected from its light, Poisson-like tail.
+Barabási–Albert instead overshoots (68): preferential attachment does generate a
+heavy tail, confirming the mechanism is relevant, but in its pure form it produces
+hubs larger than any observed product. BA captures the *presence* of a heavy tail,
+but not its precise shape.
+
+Finally, both null models have much shorter **average path lengths** (4.0 and 3.6)
+than the empirical network (7.1). The Product Space is more stretched out: its
+products are, on average, farther apart, consistent with the core–periphery layout
+seen on the map.
+
+The summary table reports only the maximum degree, but the whole shape of the degree
+distribution matters. To compare the tails directly, we plot the complementary
+cumulative distribution $P(\text{degree} \geq x)$ for the three networks on a
+log–log scale: this shows, for each model, how far its degree tail reaches and how
+much probability mass sits at high degrees.
+
+```{r degree-ccdf-plot}
+deg_tbl = bind_rows(
+  tibble(model = "Empirical",       degree = igraph::degree(g)),
+  tibble(model = "Erdős–Rényi",     degree = igraph::degree(g_er)),
+  tibble(model = "Barabási–Albert", degree = igraph::degree(g_ba))
+) |>
+  filter(degree > 0) |>
+  group_by(model) |>
+  arrange(degree) |>
+  mutate(ccdf = 1 - (row_number() - 1) / n()) |>
+  ungroup()
+
+ggplot(deg_tbl, aes(x = degree, y = ccdf, color = model)) +
+  geom_step(linewidth = 0.9) +
+  scale_x_log10() + scale_y_log10() +
+  scale_color_manual(values = c("Empirical" = "black",
+                                "Erdős–Rényi" = "steelblue",
+                                "Barabási–Albert" = "firebrick")) +
+  labs(title = "Degree distributions: complementary CDF (log–log)",
+       x = "Degree", y = "P(Degree ≥ x)", color = NULL) +
+  theme_minimal() +
+  theme(panel.grid.minor = element_blank(), legend.position = "top")
+```
+
+The complementary CDF makes the differences in the tails clear. The Erdős–Rényi tail
+(blue) collapses early, almost no vertex exceeds degree 16, confirming that random
+wiring cannot produce hubs. The empirical (black) and Barabási–Albert (red) tails are
+far heavier and broadly similar to each other: both extend to high degrees, with BA
+reaching a slightly larger maximum. In the mid-to-high range the empirical curve even
+sits above BA, meaning the Product Space has somewhat more medium-hub products than
+pure preferential attachment produces. So on the degree distribution, BA is a
+reasonable approximation, far better than ER, which is consistent with preferential
+attachment being a relevant mechanism for the heavy tail. The gap
+between the models is not in the degree sequence but, as we saw, in the clustering.
+
+### **Parametric Bootstrap Assessment**
+
+The comparisons so far are informative but informal: they contrast the observed
+network with a *single* simulated draw from each model. A single draw cannot tell us
+whether the gap we see, especially in clustering, is a real structural difference
+or just sampling variability. To settle this, we use a **parametric bootstrap**. For
+each null model we simulate 500 networks of the same size as the Product Space,
+compute the global transitivity of each, and build its sampling distribution under
+that model. We then ask how far the observed transitivity (0.434) falls from what the
+model can plausibly produce.
+
+We focus on transitivity because it is the statistic where both null models failed
+most clearly: the degree tail is at least partly captured by Barabási–Albert, but the
+clustering is not reproduced by either.
+
+
+```{r bootstrap-run}
+set.seed(SEED)
+B = 500
+obs = transitivity(g, type = "global")
+
+# One function, applied to both models
+bootstrap_transitivity = function(simulate_fn) {
+  replicate(B, transitivity(simulate_fn(), type = "global"))
+}
+
+er_transitivity = bootstrap_transitivity(
+  function() sample_gnm(n = vcount(g), m = ecount(g))
+)
+ba_transitivity = bootstrap_transitivity(
+  function() sample_pa(n = vcount(g), m = 3, directed = FALSE)
+)
+
+# Summary as a tidy tibble
+bootstrap_summary = bind_rows(
+  tibble(model = "Erdős–Rényi",     value = er_transitivity),
+  tibble(model = "Barabási–Albert", value = ba_transitivity)
+) |>
+  group_by(model) |>
+  summarise(
+    mean_sim     = round(mean(value), 4),
+    sd_sim       = round(sd(value), 4),
+    max_sim      = round(max(value), 4),
+    observed     = round(obs, 4),
+    std_distance = round((obs - mean(value)) / sd(value), 1)
+  )
+
+bootstrap_summary
+```
+
+The table reports the gap as a single distance in standard deviations; the plot below
+shows it directly. 
+
+On a logarithmic scale, the two bootstrap distributions are clearly
+separated: Erdős–Rényi around 0.006, Barabási–Albert around 0.02. Both sit
+orders of magnitude below the observed transitivity (0.434), marked by the dashed
+line.
+
+```{r bootstrap-plot}
+boot_tbl = bind_rows(
+  tibble(model = "ER", transitivity = er_transitivity),
+  tibble(model = "BA", transitivity = ba_transitivity)
+)
+obs = transitivity(g, type = "global")
+
+ggplot(boot_tbl, aes(x = transitivity, fill = model)) +
+  geom_histogram(alpha = 0.6, bins = 40, position = "identity") +
+  geom_vline(xintercept = obs, linetype = "dashed", linewidth = 0.8) +
+  annotate("text", x = obs, y = Inf, label = "Observed (0.434)",
+           hjust = 1.1, vjust = 2, size = 3.5) +
+  scale_x_log10() +
+  scale_fill_manual(values = c("ER" = "steelblue", "BA" = "firebrick")) +
+  labs(title = "Bootstrap distributions of global transitivity (log scale)",
+       x = "Global transitivity (log scale)", y = "Count", fill = NULL) +
+  theme_minimal() +
+  theme(panel.grid.minor = element_blank(), legend.position = "top")
+```
+
+The picture is unambiguous. Both null models concentrate in a narrow band well below
+0.03, while the observed transitivity sits far to the right, separated from either
+distribution by a large gap: about 353 standard deviations from the Erdős–Rényi mean
+and 287 from the Barabási–Albert mean. No simulated network came remotely close to the
+observed value.
+
+This closes the analysis of the global models with a clear diagnosis. The two models
+fail in complementary ways: Erdős–Rényi reproduces neither the hubs nor the
+clustering, while Barabási–Albert captures the heavy degree tail, as the degree
+distribution showed, but generates almost no clustering. What neither model can
+reproduce is the **high transitivity** of the Product Space: the tendency of products
+to form tightly connected groups. This is not a quantity that randomness or
+preferential attachment can explain, because both treat the network as globally
+homogeneous, with no notion of which products belong together.
+
+The missing ingredient is therefore the **community structure** itself. The clustering
+that the global models cannot generate is exactly what arises when products are
+organised into sectors, with dense connections inside each sector and sparse ones
+across them. This motivates the community-level models of the next section, which
+build this structure into the model explicitly.
+

@@ -144,17 +144,17 @@ the product nodes and their backbone edges remain.
 `check.names = FALSE` preserves the original headers; we strip the leading `#`.
 
 ```{r load-raw}
-nodes_raw <- read.csv(here("data", "raw", "nodes.csv"),
+nodes_raw = read.csv(here("data", "raw", "nodes.csv"),
                       stringsAsFactors = FALSE, check.names = FALSE)
-edges_raw <- read.csv(here("data", "raw", "edges.csv"),
+edges_raw = read.csv(here("data", "raw", "edges.csv"),
                       stringsAsFactors = FALSE, check.names = FALSE)
-gprops    <- read.csv(here("data", "raw", "gprops.csv"),
+gprops    = read.csv(here("data", "raw", "gprops.csv"),
                       stringsAsFactors = FALSE, check.names = FALSE)
 
-clean_names <- function(x) trimws(gsub("^#\\s*", "", x))
-names(nodes_raw) <- clean_names(names(nodes_raw))
-names(edges_raw) <- clean_names(names(edges_raw))
-names(gprops)    <- clean_names(names(gprops))
+clean_names = function(x) trimws(gsub("^#\\s*", "", x))
+names(nodes_raw) = clean_names(names(nodes_raw))
+names(edges_raw) = clean_names(names(edges_raw))
+names(gprops)    = clean_names(names(gprops))
 ```
 
 ## **Fix mislabelled columns and flag layout-only attributes**
@@ -162,7 +162,7 @@ names(gprops)    <- clean_names(names(gprops))
 Headers follow the SITC layout, but this is the HS file: the column named `leamer` holds the **product name** and `name` holds the **hex colour**. We also rename `size`/`width` to make clear they are non-linear, layout-only.
 
 ```{r fix-columns}
-nodes <- data.frame(
+nodes = data.frame(
   index       = as.integer(nodes_raw$index),
   pid         = nodes_raw$pid,                 # HS product id
   product     = trimws(nodes_raw$leamer),      # real product name
@@ -178,7 +178,7 @@ Each distinct colour is one author-defined community; we map it to an integer id
 to use later as a reference partition.
 
 ```{r community-ref}
-nodes$community_ref <- as.integer(factor(nodes$color))
+nodes$community_ref = as.integer(factor(nodes$color))
 cat("Reference communities:", length(unique(nodes$community_ref)), "\n")
 print(table(nodes$community_ref))
 ```
@@ -186,12 +186,12 @@ print(table(nodes$community_ref))
 ## **Parse layout coordinates**
 
 ```{r parse-pos}
-parse_pos <- function(s) {
-  nums <- regmatches(s, gregexpr("-?[0-9]+\\.?[0-9]*", s))
+parse_pos = function(s) {
+  nums = regmatches(s, gregexpr("-?[0-9]+\\.?[0-9]*", s))
   do.call(rbind, lapply(nums, function(v) as.numeric(v[1:2])))
 }
 xy <- parse_pos(nodes_raw$pos)
-nodes$x <- xy[, 1]; nodes$y <- xy[, 2]
+nodes$x = xy[, 1]; nodes$y <- xy[, 2]
 ```
 
 ## **Clean edges**
@@ -212,22 +212,22 @@ edges <- data.frame(
 We attach `width_layout` as the igraph `weight` so weighted variants are available as a robustness check, but **primary analyses treat the network as unweighted**. Provenance and the construction rule are stored as graph attributes so they travel with the object.
 
 ```{r build-graph}
-vertices_df <- nodes[, c("index", "pid", "product", "community_ref",
+vertices_df = nodes[, c("index", "pid", "product", "community_ref",
                          "size_layout", "color", "x", "y")]
-edges_df    <- edges[, c("source", "target", "width_layout")]
+edges_df    = edges[, c("source", "target", "width_layout")]
 
-g <- graph_from_data_frame(d = edges_df, directed = FALSE, vertices = vertices_df)
+g = graph_from_data_frame(d = edges_df, directed = FALSE, vertices = vertices_df)
 
 # Expose the ordinal weight under igraph's canonical name, with the caveat recorded.
-E(g)$weight <- E(g)$width_layout
+E(g)$weight = E(g)$width_layout
 
-g <- set_graph_attr(g, "name", "Product Space (HS)")
-g <- set_graph_attr(g, "source", "Coscia PS_HS.zip; Hidalgo et al. Science 2007")
-g <- set_graph_attr(g, "construction", "Maximum Spanning Tree + proximity phi > 0.55")
-g <- set_graph_attr(g, "note",
+g = set_graph_attr(g, "name", "Product Space (HS)")
+g = set_graph_attr(g, "source", "Coscia PS_HS.zip; Hidalgo et al. Science 2007")
+g = set_graph_attr(g, "construction", "Maximum Spanning Tree + proximity phi > 0.55")
+g = set_graph_attr(g, "note",
   "weight is ordinal (from layout-only width); primary analyses unweighted, weighted as robustness check")
 
-layout_xy <- as.matrix(nodes[, c("x", "y")])
+layout_xy = as.matrix(nodes[, c("x", "y")])
 ```
 
 ## **Verify and inspect**
