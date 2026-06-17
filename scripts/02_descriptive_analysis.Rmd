@@ -1,7 +1,7 @@
 ---
 title: "The Product Space (HS): Descriptive Analysis"
 subtitle: "Statistical and Computational Methods for Network Data"
-author: "Matteo Gerevini, Beatrice Liuni, Lorenzo Meroni"
+author: "Matteo Gerevini | Beatrice Liuni | Lorenzo Meroni"
 date: "`r Sys.Date()`"
 output:
   html_document:
@@ -52,17 +52,14 @@ nodes_tbl |> select(name, pid, product, community_ref, size_layout) |> head(10)
 edges_tbl |> head(10)
 ```
 
-The edge table shows two metric columns, `width_layout` and `weight`, with the same values; this is on purpose. 
+The edge table shows the metric column `width_layout`. 
 
 The original value is the line *thickness* used to draw the network in the Atlas
-visualization. According to the dataset documentation this thickness is
+visualization. According to the dataset documentation, this thickness is
 non-linear and meant for layout only, so it is **not** the true proximity score
-$\varphi$ and should not be read as a real edge weight. We keep it under two names
-for two reasons: `width_layout` records what the value really is (a drawing
-thickness), while `weight` is the name that igraph looks for when running weighted
-computations. Our main analyses treat the network as **unweighted**; we use the
-weight only later, as a robustness check, to confirm that results do not depend on
-this layout-only value.
+$\varphi$ and should not be read as a real edge weight. Because it is a layout-only
+attribute, we treat the network as strictly unweighted in all our structural
+analyses. 
 
 ### **Communities**
 
@@ -130,7 +127,7 @@ and so on. This coherence is also a **sanity check** on the data: products group
 together do share an economic logic, which confirms that the community labels are
 meaningful and correctly aligned with the products.
 
-A few products sit in a community that does not match their obvious type — for
+A few products sit in a community that does not match their obvious type, for
 example a woven-wool fabric inside the machinery community. This is expected rather
 than an error, for two complementary reasons. First, the communities come from
 **co-export patterns**, not from a product classification: a product is grouped with

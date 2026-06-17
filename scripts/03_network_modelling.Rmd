@@ -13,7 +13,7 @@ output:
 
 # **Network Modelling**
 
-## **Setup and Data Loading**
+# **Setup and Data Loading**
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
@@ -27,7 +27,7 @@ g = readRDS(here("data", "processed", "product_space_enriched.rds"))
 SEED = 5836   
 ```
 
-## **Introduction and Objectives**
+# **Introduction and Objectives**
 
 The descriptive analysis (`02_descriptive_analysis.Rmd`) revealed a highly organized topology: an extremely low
 density ($\approx 0.0068$) paired with a high global transitivity ($\approx 0.43$), a
@@ -65,7 +65,7 @@ Together these models form a single axis,  the edge probability under increasing
 rich assumptions, along which we can locate exactly where the structure of the
 Product Space resides.
 
-## **Global Models**
+# **Global Models**
 
 Before modelling the community structure explicitly, we ask a more basic question:
 how much of the Product Space can be explained by simple, global mechanisms that
@@ -88,7 +88,7 @@ features each one can and cannot reproduce, and what that failure tells us about
 forces shaping the network.
 
 
-### **Erdős–Rényi: The Null Model**
+## **Erdős–Rényi: The Null Model**
 
 The Erdős–Rényi (ER) model is the simplest random graph model and serves as our
 baseline. In the $G(n, p)$ formulation, a graph has $n$ vertices and each of the
@@ -126,7 +126,7 @@ c(
 )
 ```
 
-### **Barabási–Albert: Preferential Attachment**
+## **Barabási–Albert: Preferential Attachment**
 
 The Erdős–Rényi model treats all vertices identically. The Barabási–Albert (BA) model
 instead introduces heterogeneity through *growth* and *preferential attachment*.
@@ -358,4 +358,144 @@ that the global models cannot generate is exactly what arises when products are
 organised into sectors, with dense connections inside each sector and sparse ones
 across them. This motivates the community-level models of the next section, which
 build this structure into the model explicitly.
+
+# **Community-Level Models**
+
+The global models failed for a specific reason: they treat the network as
+homogeneous, with no notion of which products belong together. The clustering they
+cannot reproduce is precisely what arises when products are organised into sectors.
+We now build this structure into the model, conditioning the probability of an edge
+on the communities of the two products it would connect.
+
+We do this in two steps of increasing resolution. First, an **exponential random
+graph model (ERGM)** introduces the communities in the simplest possible way, through
+a single *homophily* term that distinguishes only whether two products belong to the
+same sector or to different ones. Because this term is *dyad-independent*, the model
+reduces to a logistic regression on the edges and can be estimated exactly, avoiding
+the degeneracy and heavy computation that affect general ERGMs. Then a **stochastic
+blockmodel** refines this, estimating a separate connection rate for every pair of
+sectors. The ERGM thus answers a first, coarse question: does sharing a community, in
+itself, make an edge more likely?
+
+## **Exponential Random Graph Model (ERGM)**
+
+We begin with the exponential random graph model. An ERGM expresses the probability
+of the whole network through a set of summary statistics; by choosing a statistic
+that counts within-community edges, we can test directly whether community membership
+drives edge formation.
+
+### **The Model**
+
+An exponential random graph model specifies the probability of the entire observed
+graph $g$ through a set of *sufficient statistics* $T(g)$. In the course notation,
+
+$$
+P[G = g] = \frac{1}{\kappa(\theta)} \exp\left\{ \theta^\top T(g) \right\},
+$$
+
+where $T(g)$ is a vector of network statistics, $\theta$ the corresponding
+parameters, and $\kappa(\theta)$ a normalising constant ensuring the probabilities
+sum to one. The choice of $T(g)$ determines which structural features the model
+targets: taking $T(g) = |E|$ (the number of edges) recovers the Erdős–Rényi model,
+while adding the number of triangles would target clustering.
+
+The statistics divide into two kinds, and the distinction is crucial here.
+**Structural** statistics (such as the triangle count) make the existence of one edge
+depend on others, so the likelihood involves the intractable normaliser
+$\kappa(\theta)$ and must be estimated by Markov Chain Monte Carlo — an approach that
+is computationally heavy and, for many parameter values, leads to *degenerate* models
+that place almost all probability on the empty or the complete graph. **Dyad-
+independent** statistics, by contrast, make each edge depend only on its two
+endpoints. In that case the normaliser factorises and the ERGM reduces exactly to a
+logistic regression on the edges:
+
+$$
+\text{logit}\, P(A_{ij} = 1) = \theta_{\text{edges}} + \delta \, \mathbb{1}[c_i = c_j],
+$$
+
+where $c_i$ denotes the community of product $i$ and the indicator $\mathbb{1}[c_i = c_j]$
+is 1 when the two products share a sector. The coefficient $\delta$ — the
+**homophily** parameter (`nodematch`) — measures the increase in the log-odds of an
+edge when two products belong to the same community.
+
+We deliberately restrict the model to this dyad-independent term. It directly encodes
+our question, that is whether sharing a sector drives connection and, being
+dyad-independent, it can be estimated exactly, free of the degeneracy and Monte Carlo
+cost of structural terms. Below we make this concrete: we attempt to add a clustering
+term, using GWESP, the statistic specifically designed to resist degeneracy and
+show that even so the model fails to converge on this network.
+
+### **Fitting the Homophily Model**
+
+We convert the graph to the format used by the `ergm` package and fit the model in
+two stages: a baseline with only the edge count, then the homophily term.
+
+```{r ergm-setup}
+library(intergraph)
+library(network)
+library(ergm)
+
+g_net = asNetwork(g)
+g_net
+```
+
+```{r ergm-models}
+set.seed(SEED)
+
+m1 = ergm(g_net ~ edges) # baseline, edges only
+
+m2 = ergm(g_net ~ edges + nodematch("community_ref")) # add community homophily (dyad-independent term)
+
+summary(m1)
+summary(m2)
+```
+
+Note that both models are estimated by maximum pseudolikelihood, not MCMC: this is the practical confirmation that dyad-independent terms admit exact estimation, with none of the Monte Carlo machinery the general case requires.
+
+The coefficients are read on the log-odds (logit) scale, so we convert them to
+probabilities to interpret them. Recall the dyad-independent form of the model:
+
+$$
+\text{logit}\, P(A_{ij} = 1) = \theta_{\text{edges}} + \delta \, \mathbb{1}[c_i = c_j],
+$$
+
+so that
+
+$$
+P(A_{ij} = 1) = \text{logit}^{-1}\!\left( \theta_{\text{edges}} + \delta \,
+\mathbb{1}[c_i = c_j] \right) = \frac{1}{1 + e^{-(\theta_{\text{edges}} + \delta\,
+\mathbb{1}[c_i = c_j])}}.
+$$
+
+The indicator $\mathbb{1}[c_i = c_j]$ switches the homophily term on or off, giving
+two regimes:
+
+**Between sectors** ($c_i \neq c_j$, indicator $=0$):
+$$
+P_{\text{inter}} = \text{logit}^{-1}(\theta_{\text{edges}})
+= \text{logit}^{-1}(-6.34) \approx 0.0018.
+$$
+
+**Within a sector** ($c_i = c_j$, indicator $=1$):
+$$
+P_{\text{intra}} = \text{logit}^{-1}(\theta_{\text{edges}} + \delta)
+= \text{logit}^{-1}(-6.34 + 3.09) = \text{logit}^{-1}(-3.25) \approx 0.037.
+$$
+
+On the odds scale the homophily coefficient has a direct multiplicative reading: the
+*odds* of a within-sector edge are $e^{\delta} = e^{3.09} \approx 22$ times the odds of
+a between-sector edge. Sharing a community multiplies the propensity to connect by
+roughly twenty-two.
+
+The interpretation is unambiguous. The homophily coefficient is large and decisively
+significant ($\delta = 3.09$, $z = 64.5$, $p < 0.001$): community membership is a
+powerful predictor of edge formation. This is the formal counterpart of the
+descriptive finding that 78% of edges fall within sectors. The sharp drop in AIC,
+from 30352 to 25107, confirms that this single term captures a large part of the
+structure that density alone misses.
+
+It is worth recalling what an edge means here: two products are linked when the same countries tend to be competitive exporters of both (the proximity measure on which the Product Space is built), a proxy for shared productive capabilities. The strong sector homophily then has a natural economic reading: products in the same sector tend to require similar capabilities, so a country competitive in one is often competitive in the others, while crossing sectors demands different capabilities and is far rarer. We offer this interpretation with caution — the network captures co-export proximity on a pruned backbone, not direct economic causation.
+
+Yet this same reasoning exposes a limitation. If different sectors rest on different
+capabilities, they need not be equally cohesive, and homophily, as specified here, cannot capture that: it forces a single within-sector probability ($\approx 0.037$) onto all communities alike. Given that the sectors differed greatly in size and internal density in the descriptive analysis, whether one uniform rate is adequate is exactly the question the blockmodel will address.
 
