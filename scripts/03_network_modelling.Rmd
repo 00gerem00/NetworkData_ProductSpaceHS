@@ -232,13 +232,15 @@ deg_tbl = bind_rows(
   tibble(model = "Barabási–Albert", degree = igraph::degree(g_ba))
 ) |>
   filter(degree > 0) |>
-  group_by(model) |>
-  arrange(degree) |>
-  mutate(ccdf = 1 - (row_number() - 1) / n()) |>
+  group_by(model, degree) |> 
+  summarise(count = n(), .groups = 'drop') |> 
+  group_by(model) |> 
+  arrange(desc(degree)) |> 
+  mutate(ccdf = cumsum(count) / sum(count)) |> 
   ungroup()
 
 ggplot(deg_tbl, aes(x = degree, y = ccdf, color = model)) +
-  geom_step(linewidth = 0.9) +
+  geom_step(linewidth = 0.9, direction = "vh") + # direction="vh" per scalini corretti
   scale_x_log10() + scale_y_log10() +
   scale_color_manual(values = c("Empirical" = "black",
                                 "Erdős–Rényi" = "steelblue",
@@ -387,7 +389,7 @@ drives edge formation.
 ### **The Model**
 
 An exponential random graph model specifies the probability of the entire observed
-graph $g$ through a set of *sufficient statistics* $T(g)$. In the course notation,
+graph $g$ through a set of *sufficient statistics* $T(g)$.
 
 $$
 P[G = g] = \frac{1}{\kappa(\theta)} \exp\left\{ \theta^\top T(g) \right\},
@@ -402,7 +404,7 @@ while adding the number of triangles would target clustering.
 The statistics divide into two kinds, and the distinction is crucial here.
 **Structural** statistics (such as the triangle count) make the existence of one edge
 depend on others, so the likelihood involves the intractable normaliser
-$\kappa(\theta)$ and must be estimated by Markov Chain Monte Carlo — an approach that
+$\kappa(\theta)$ and must be estimated by Markov Chain Monte Carlo, an approach that
 is computationally heavy and, for many parameter values, leads to *degenerate* models
 that place almost all probability on the empty or the complete graph. **Dyad-
 independent** statistics, by contrast, make each edge depend only on its two
@@ -414,16 +416,18 @@ $$
 $$
 
 where $c_i$ denotes the community of product $i$ and the indicator $\mathbb{1}[c_i = c_j]$
-is 1 when the two products share a sector. The coefficient $\delta$ — the
-**homophily** parameter (`nodematch`) — measures the increase in the log-odds of an
+is 1 when the two products share a sector. The coefficient $\delta$, that is the
+**homophily** parameter (`nodematch`), measures the increase in the log-odds of an
 edge when two products belong to the same community.
 
-We deliberately restrict the model to this dyad-independent term. It directly encodes
-our question, that is whether sharing a sector drives connection and, being
+We deliberately restrict the model to this single dyad-independent term. It directly
+encodes our question, whether sharing a sector drives connection, and, being
 dyad-independent, it can be estimated exactly, free of the degeneracy and Monte Carlo
-cost of structural terms. Below we make this concrete: we attempt to add a clustering
-term, using GWESP, the statistic specifically designed to resist degeneracy and
-show that even so the model fails to converge on this network.
+cost of structural terms. Adding a structural clustering statistic, even one designed
+to be degeneracy-resistant, such as GWESP, would require Monte Carlo estimation and,
+on a network as strongly and unevenly clustered as this one, is precisely the kind of
+specification that tends to degenerate. We discuss this below, and leave the modelling
+of clustering to the blockmodel, which represents it without structural terms.
 
 ### **Fitting the Homophily Model**
 
@@ -494,8 +498,180 @@ descriptive finding that 78% of edges fall within sectors. The sharp drop in AIC
 from 30352 to 25107, confirms that this single term captures a large part of the
 structure that density alone misses.
 
-It is worth recalling what an edge means here: two products are linked when the same countries tend to be competitive exporters of both (the proximity measure on which the Product Space is built), a proxy for shared productive capabilities. The strong sector homophily then has a natural economic reading: products in the same sector tend to require similar capabilities, so a country competitive in one is often competitive in the others, while crossing sectors demands different capabilities and is far rarer. We offer this interpretation with caution — the network captures co-export proximity on a pruned backbone, not direct economic causation.
+It is worth recalling what an edge means here: two products are linked when the same countries tend to be competitive exporters of both (the proximity measure on which the Product Space is built), a proxy for shared productive capabilities. The strong sector homophily then has a natural economic reading: products in the same sector tend to require similar capabilities, so a country competitive in one is often competitive in the others, while crossing sectors demands different capabilities and is far rarer. We offer this interpretation with caution, since the network captures co-export proximity on a pruned backbone, not direct economic causation.
 
 Yet this same reasoning exposes a limitation. If different sectors rest on different
 capabilities, they need not be equally cohesive, and homophily, as specified here, cannot capture that: it forces a single within-sector probability ($\approx 0.037$) onto all communities alike. Given that the sectors differed greatly in size and internal density in the descriptive analysis, whether one uniform rate is adequate is exactly the question the blockmodel will address.
 
+### **Why We Stop at Dyad-Independent Terms**
+
+The homophily model captures *who* connects to whom at the sector level, but not
+*clustering*; the tendency to form triangles that the global models failed to
+reproduce. The natural extension would be to add a clustering statistic to the ERGM.
+
+This is where dyad-independence ends and the difficulties begin. A clustering term
+makes the probability of one edge depend on others, so the model can no longer be
+estimated exactly: it requires Markov Chain Monte Carlo. The raw triangle count is
+notoriously degenerate, triangles reinforce one another and the model collapses onto
+the empty or the complete graph. The standard remedy, the *geometrically weighted
+edgewise shared partner* (GWESP) term, was designed precisely to dampen this feedback
+through a decay parameter that down-weights additional shared partners; lower decay
+values are more resistant to degeneracy, higher ones closer to the raw triangle count.
+
+Even so, such terms are well documented to degenerate on strongly clustered networks,
+and the Product Space is an especially adverse case for two reasons established in the
+descriptive analysis. First, its clustering is *extreme*: a global transitivity of
+0.43 on a very sparse network means triangles are highly concentrated, the regime
+where the triangle feedback is strongest. Second, the clustering is *highly
+heterogeneous* across sectors, with internal densities ranging from about 0.18 in the
+smallest communities to 0.007 in the largest. A GWESP term imposes a *single* global
+clustering parameter on the whole network; it cannot represent that some sectors are
+tightly knit while others are nearly empty inside. Asking one parameter to describe
+such uneven structure is a misspecification, exactly the situation in which structural
+ERGMs fail to converge, across decay values.
+
+We therefore stop at the dyad-independent homophily term, which the ERGM estimates
+exactly and interprets cleanly. The very feature that defeats a global clustering
+term, that cohesion differs sharply from one sector to another, is what a blockmodel
+is built to represent: rather than one clustering parameter for the whole network, it
+estimates a separate connection rate for each pair of sectors. The structure of our
+graph thus does not merely rule out structural ERGM terms; it points directly to the
+model that comes next: the stochastic blockmodel.
+
+
+
+
+
+
+# **STOCAZZI BLOCKMODEL**
+
+
+
+
+```{r blockmodel-known}
+comm = V(g)$community_ref
+
+n_q = as_tibble(table(comm)) |>
+  rename(community = comm, size = n) |>
+  mutate(community = as.integer(community))   # <- fix: keep integer
+
+el = as_edgelist(g, names = FALSE)
+
+edge_counts = tibble(
+  q = pmin(comm[el[, 1]], comm[el[, 2]]),
+  r = pmax(comm[el[, 1]], comm[el[, 2]])
+) |>
+  count(q, r, name = "edges")
+
+pairs_tbl = expand_grid(q = sort(unique(comm)), r = sort(unique(comm))) |>
+  filter(q <= r) |>
+  left_join(n_q |> rename(q = community, n_q = size), by = "q") |>
+  left_join(n_q |> rename(r = community, n_r = size), by = "r") |>
+  mutate(
+    possible = if_else(q == r, choose(n_q, 2), as.numeric(n_q) * n_r)
+  )
+
+block_tbl = pairs_tbl |>
+  left_join(edge_counts, by = c("q", "r")) |>
+  mutate(
+    edges  = replace_na(edges, 0),
+    pi_hat = round(edges / possible, 4),
+    type   = if_else(q == r, "intra", "inter")
+  ) |>
+  select(q, r, type, edges, possible, pi_hat)
+
+block_tbl
+```
+
+
+```{r blockmodel-intra}
+block_tbl |>
+  filter(type == "intra") |>
+  left_join(n_q |> rename(q = community), by = "q") |>
+  arrange(desc(pi_hat)) |>
+  select(community = q, size, edges, pi_hat)
+```
+
+
+```{r blockmodel-summary}
+block_tbl |>
+  group_by(type) |>
+  summarise(
+    mean_pi   = round(mean(pi_hat), 4),
+    median_pi = round(median(pi_hat), 4),
+    max_pi    = round(max(pi_hat), 4)
+  )
+```
+
+
+```{r blockmodel-check}
+# Total edges across all blocks must equal the network's edge count
+sum(block_tbl$edges)        # should be 2532
+ecount(g)                   # 2532
+
+# Intra vs inter totals must match Section 3.5.1 (1966 intra, 566 inter)
+block_tbl |>
+  group_by(type) |>
+  summarise(total_edges = sum(edges))
+```
+
+
+```{r sbm-variational}
+library(sbm)
+
+# SBM works on the adjacency matrix
+A = as_adjacency_matrix(g, sparse = FALSE)
+
+# Estimate the SBM: the algorithm discovers the blocks and probabilities
+set.seed(SEED)
+sbm_fit = estimateSimpleSBM(
+  A,
+  model = "bernoulli",
+  estimOptions = list(verbosity = 1, plot = FALSE, exploreMax = 12)
+)
+```
+
+
+```{r}
+# Quanti blocchi ha selezionato l'ICL?
+sbm_fit$nbBlocks
+
+# La matrice delle probabilità tra blocchi
+round(coef(sbm_fit)$mean, 4)
+
+# Le dimensioni dei blocchi trovati
+table(sbm_fit$memberships)
+```
+
+
+```{r sbm-comparison}
+tibble(
+  official = factor(V(g)$community_ref),
+  sbm      = factor(sbm_fit$memberships)
+) |>
+  count(official, sbm) |>
+  pivot_wider(names_from = sbm, values_from = n, values_fill = 0)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Before concluding this section, it is crucial to acknowledge a fundamental theoretical trade-off shared by both the homophily ERGM and the standard Stochastic Blockmodel we just fitted. By moving from the Barabási–Albert baseline to these community-level models, we traded one structural focus for another. The BA model successfully captured degree heterogeneity (hubs) but remained blind to community boundaries. Conversely, our ERGM and standard SBM explicitly capture sectoral boundaries and measure intra/inter-group attraction, but they assume uniform connection probabilities within those blocks, effectively ignoring the heavy-tailed degree distribution. Capturing both phenomena simultaneously would require more complex model specifications capable of jointly handling group-level probabilities and individual node heterogeneity, which falls beyond the scope of our analysis. Nonetheless, isolating the community effect demonstrates mathematically what the global models lacked: sectoral homophily is a primary generative driver of the Product Space topology.

@@ -788,7 +788,7 @@ self-contained, keeping almost all their links internal.
 The result for community 2 (heavy machinery) is more nuanced than expected. In
 *relative* terms it is among the more closed communities: only about 14% of its
 links cross to other communities, so most of its connections stay internal. Yet in
-*absolute* terms it has the largest number of outgoing links of any community (225),
+*absolute* terms it has the second largest number of outgoing links of any community (225),
 because it is so large. So community 2 is not a connective core in the sense of
 being proportionally open; its central position comes instead from its sheer size
 and the resulting high absolute number of connections, both internal and external.
