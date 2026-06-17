@@ -190,16 +190,16 @@ parse_pos = function(s) {
   nums = regmatches(s, gregexpr("-?[0-9]+\\.?[0-9]*", s))
   do.call(rbind, lapply(nums, function(v) as.numeric(v[1:2])))
 }
-xy <- parse_pos(nodes_raw$pos)
+xy = parse_pos(nodes_raw$pos)
 nodes$x = xy[, 1]; nodes$y <- xy[, 2]
 ```
 
 ## **Clean edges**
 
-The `width` is layout-only and non-linear. We keep it as `width_layout` and will also expose it as an **ordinal** weight (see next chunk), used only for weighted-vs-unweighted robustness checks, never as the proximity $\varphi$.
+The `width` is layout-only and non-linear. We keep it as `width_layout` for visual plotting purposes and never as the proximity $\varphi$.
 
 ```{r clean-edges}
-edges <- data.frame(
+edges = data.frame(
   source       = as.integer(edges_raw$source),
   target       = as.integer(edges_raw$target),
   width_layout = edges_raw$width,             # drawing thickness, non-linear, LAYOUT ONLY
@@ -209,7 +209,7 @@ edges <- data.frame(
 
 ## **Build the graph with provenance metadata**
 
-We attach `width_layout` as the igraph `weight` so weighted variants are available as a robustness check, but **primary analyses treat the network as unweighted**. Provenance and the construction rule are stored as graph attributes so they travel with the object.
+We explicitly do not assign an igraph `weight` attribute, ensuring the network is treated as unweighted by default in all structural computations. Provenance and the construction rule are stored as graph attributes so they travel with the object.
 
 ```{r build-graph}
 vertices_df = nodes[, c("index", "pid", "product", "community_ref",
@@ -218,14 +218,10 @@ edges_df    = edges[, c("source", "target", "width_layout")]
 
 g = graph_from_data_frame(d = edges_df, directed = FALSE, vertices = vertices_df)
 
-# Expose the ordinal weight under igraph's canonical name, with the caveat recorded.
-E(g)$weight = E(g)$width_layout
-
 g = set_graph_attr(g, "name", "Product Space (HS)")
 g = set_graph_attr(g, "source", "Coscia PS_HS.zip; Hidalgo et al. Science 2007")
 g = set_graph_attr(g, "construction", "Maximum Spanning Tree + proximity phi > 0.55")
-g = set_graph_attr(g, "note",
-  "weight is ordinal (from layout-only width); primary analyses unweighted, weighted as robustness check")
+g = set_graph_attr(g, "note", "network is strictly unweighted; width_layout is for visual plotting only")
 
 layout_xy = as.matrix(nodes[, c("x", "y")])
 ```
@@ -247,11 +243,11 @@ head(igraph::as_data_frame(g, what = "vertices"))
 
 ### **A note on the edge weight**
 
-The graph reports `Weighted: TRUE`, so a word on what that means here. In igraph, a graph is "*weighted*" simply when its edges carry an attribute named `weight`; we created one by copying `width_layout` into it. The technical flag therefore says nothing about the *quality* of that weight, only that the attribute exists.
+The graph reports `Weighted: FALSE`.
 
-What the weight actually is matters more. The value (ranging from 1 to 4) is the **drawing thickness** of the edge in the original Atlas visualization, which the official documentation describes as *non-linear* and *for layout purposes only*. It is **not** the proximity $\varphi$ and cannot be converted back to it. Concretely, an edge with `weight = 4` was drawn thicker than one with `weight = 1`, and this roughly tracks a higher proximity (thicker -> closer), but the relationship is non-linear: a weight of 4 does **not** mean "four times closer" than a weight of 1.The number preserves only the **ordering** of edge strengths, not their ratios. This is what we mean by calling it an **ordinal** weight: the ranking is informative, the magnitudes are not.
+The dataset provides a `width` value for edges (ranging from 1 to 4), which represents the **drawing thickness** of the edge in the original Atlas visualization. The official documentation describes this attribute as non-linear and meant for layout purposes only. It is not the underlying proximity score $\varphi$ and cannot be converted back to it. Concretely, an edge with a width of 4 does not mean it represents a connection four times stronger than a width of 1; the number only preserves a visual ranking.
 
-For this reason our methodological choice is deliberate. **Primary analyses treat the network as unweighted**, since the weight is not a trustworthy quantitative measure. We nonetheless retain it as an attribute so that each analysis can be repeated in a **weighted variant as a robustness check**, confirming that conclusions do not hinge on the layout-only weight. In practice this means we will pass `weights = NA` where the unweighted result is wanted (to stop igraph from silently using the weight by default), and supply `E(g)$weight` explicitly only for the robustness comparison.
+Because of this, our methodological choice is deliberate: we treat the network as strictly unweighted in all analyses, dropping the standard igraph `weight` attribute entirely to avoid accidental usage in routing or centrality algorithms. We retain these thickness values solely under the custom width_layout attribute, accessing them exclusively when scaling the links to draw the canonical network maps.
 
 ## **Save Processed Objetcs**
 
@@ -265,4 +261,4 @@ list.files(here("data", "processed"))
 
 # **Summary**
 
-The cleaned object is an **undirected** network of **866 products** and **2,532 backbone edges**, in a single connected component, carrying an **ordinal edge weight** (from the layout-only width, used only for robustness checks) and a **12-community reference partition** recovered from node colour. It is built from country export data via RCA and proximity, then reduced to a maximum-spanning-tree backbone with $\varphi > 0.55$. The country layer and the raw proximity values are not recoverable, so the analysis is product-side and topological.
+The cleaned object is a strictly **unweighted**,  **undirected** network of **866 products** and **2,532 backbone edges**, in a single connected component, ccarrying a layout-only thickness attribute (used strictly for visualization) and a 12-community reference partition recovered from node colour. It is built from country export data via RCA and proximity, then reduced to a maximum-spanning-tree backbone with $\varphi > 0.55$. The country layer and the raw proximity values are not recoverable, so the analysis is product-side and topological.

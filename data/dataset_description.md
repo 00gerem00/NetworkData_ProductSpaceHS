@@ -77,12 +77,10 @@ our own community detection.
 
 1. **`width` and `size` are layout-only and non-linear.** The official docs state
    both are "not linearly connected to its strength / market share" and "should
-   be used exclusively for layout purposes." Consequently the edge `width` is
-   **not** the proximity φ and cannot be converted back to it. It is retained as
-   an **ordinal** edge weight and used only for weighted-vs-unweighted robustness
-   comparisons; `size` is likewise kept as an ordinal/visual cue. Primary analyses
-   treat the network as **unweighted**, with weighted variants reported as a
-   robustness check.
+   be used exclusively for layout purposes." Consequently, the edge `width` is
+   **not** the true proximity φ and cannot be converted back to it. It is retained 
+   strictly as a visual cue (`width_layout`) to reproduce the canonical maps. The 
+   network is strictly treated as **unweighted** in all computations.
 
 2. **Mislabelled columns (HS vs SITC headers).** Headers follow the SITC layout,
    but this is the HS file. So the column named `leamer` actually holds the **product name**, and the column named `name` actually holds the **hex colour / community**. The cleaning pipeline corrects this.
@@ -96,7 +94,7 @@ The cleaning pipeline (`.Rmd`) produces, in `data/processed/`:
 
 | file | content |
 |---|---|
-| `product_space.rds` | cleaned undirected igraph (ordinal `weight` from `width_layout`; primary analyses unweighted) with corrected attributes + provenance metadata |
+| `product_space.rds` | cleaned undirected, unweighted igraph with corrected attributes + provenance metadata |
 | `layout_xy.rds` | node coordinate matrix for the canonical layout |
 | `nodes_clean.csv` | human-readable cleaned node table |
 | `edges_clean.csv` | human-readable cleaned edge table |
