@@ -697,13 +697,12 @@ heat_tbl = block_tbl |>
   )
 
 ggplot(heat_tbl, aes(x = factor(q), y = factor(r), fill = pi_hat)) +
-  geom_tile(color = "white", linewidth = 0.5) +
+  geom_tile(color = "black", linewidth = 0.2) +
   geom_text(aes(label = ifelse(q == r | pi_hat > 0.004, sprintf("%.3f", pi_hat), "")),
             size = 2.7) +
   scale_fill_gradient(low = "white", high = "purple", name = expression(hat(pi))) +
   scale_y_discrete(limits = rev) +
   labs(title = "Block connection rates between the 12 sectors",
-       subtitle = "Diagonal = within-sector density; off-diagonal = between-sector",
        x = "Sector", y = "Sector") +
   coord_fixed() +
   theme_minimal() +
@@ -764,7 +763,7 @@ that re-estimates $\pi$ given those memberships. The number of blocks $Q$ is its
 selected by the Integrated Completed Likelihood (ICL), which balances fit against
 complexity.
 
-```{r sbm-variational}
+```{r sbm-variational. eval = FALSE}
 library(sbm)
 
 A = igraph::as_adjacency_matrix(g, sparse = FALSE)
@@ -787,8 +786,8 @@ pi_tbl = as_tibble(as.table(pi_sbm), .name_repair = ~ c("block_q", "block_r", "p
     block_r = factor(block_r, levels = as.character(seq_len(nrow(pi_sbm))))
   )
 ggplot(pi_tbl, aes(x = block_q, y = block_r, fill = pi)) +
-  geom_tile(color = "white", linewidth = 0.5) +
-  geom_text(aes(label = ifelse(pi >= 0.005, sprintf("%.3f", pi), "")), size = 2.5) +
+  geom_tile(color = "black", linewidth = 0.2) +
+  geom_text(aes(label = ifelse(pi >= 0.0025, sprintf("%.3f", pi), "")), size = 2.5) +
   scale_fill_gradient(low = "white", high = "purple", name = expression(hat(pi))) +
   scale_y_discrete(limits = rev) +
   labs(title = "Connection rates between SBM-Discovered Blocks",
@@ -840,7 +839,7 @@ ggplot(contingency, aes(x = official, y = sbm, fill = n)) +
   geom_tile(color = "white", linewidth = 0.5) +
   geom_text(aes(label = ifelse(n > 0, n, "")), size = 3) +
   scale_fill_gradient(low = "white", high = "purple", name = "Products") +
-  labs(title = "Official sectors vs. SBM-discovered blocks",
+  labs(title = "Tile Plot",
        subtitle = "How the 10 latent blocks map onto the 12 official sectors",
        x = "Official sector", y = "SBM block") +
   theme_minimal() +
@@ -894,20 +893,24 @@ one coherent picture, and the answer to our question is unambiguous: global mech
 are not enough, the sector structure is essential, yet even the sectors do not tell
 the whole story.
 
-The global models fail, but informatively. Erdős–Rényi misses everything — neither the
+The global models fail, but informatively. Erdős–Rényi misses everything, neither the
 hubs nor the clustering. Barabási–Albert does better on one axis: its
 preferential-attachment mechanism reproduces the heavy degree tail almost as well as
 the data, so the degree distribution is *not* where the network's structure hides. Yet
-on clustering it fails just as decisively as Erdős–Rényi — the parametric bootstrap
+on clustering it fails just as decisively as Erdős–Rényi; the parametric bootstrap
 places the observed transitivity hundreds of standard deviations beyond either null
 model. This isolates the finding: what the global models cannot reproduce is not the
 degree sequence but the *clustering*, and that clustering is the imprint of the
-sectors. The ERGM confirms it formally — sharing a sector multiplies the odds of an
+sectors. 
+
+The ERGM confirms it formally: sharing a sector multiplies the odds of an
 edge roughly twenty-two-fold. But the sectors are not uniform. The known-block model
 shows their internal density ranging from 0.18 down to 0.007, and the latent model,
 free to redraw the groups, recovers the specialised sectors cleanly while fragmenting
-or dissolving the large, diverse ones. All four analyses — clustering, centrality, and
-the two blockmodels — return the same verdict on the largest and most central sector,
+or dissolving the large, diverse ones. 
+
+All four analyses - clustering, centrality, and the two blockmodels - 
+return the same verdict on the largest and most central sector,
 heavy machinery: internally loose, a hub of distinct manufacturing capabilities rather
 than a single tight cluster. That four methods, with entirely different assumptions,
 agree on this is the strongest evidence the analysis offers.
@@ -916,21 +919,21 @@ This picture makes sense only in light of what the network *is*. The Product Spa
 a pruned backbone of co-export proximities: an edge marks two products that the same
 countries competitively export, a proxy for shared productive capabilities. Read this
 way, the structural results map onto the capability structure of the global economy.
-Specialised sectors — textiles, agriculture — are tightly knit because their products
+Specialised sectors, such as textiles, agriculture are tightly knit because their products
 rest on the same skills, infrastructure and institutions, so the countries that master
 one master the others, and the latent model recovers them as clean blocks. Large
 aggregates such as machinery are internally loose because they bundle products built
-on different capabilities, which few countries command all at once — so no single
+on different capabilities, which few countries command all at once, so no single
 dense core exists for the model to find, and the sector fragments. The core–periphery
-shape that every stage of the analysis returned — a structured core of coherent
-sectors surrounded by a periphery of weakly connected products — is the topological
+shape that every stage of the analysis returned a structured core of coherent
+sectors surrounded by a periphery of weakly connected products: is the topological
 echo of a familiar economic logic: economies grow outward from the capabilities they
 already possess, and the strongest of those relationships are exactly the ones the
 backbone retains.
 
 Before drawing the threads together, one theoretical trade-off deserves note. In
 moving from the Barabási–Albert baseline to the community-level models, we traded one
-structural focus for another. Barabási–Albert captured degree heterogeneity (the hubs) but was blind to community boundaries. The ERGM and the standard blockmodel do the
+structural focus for another. Barabási–Albert tried to capture degree heterogeneity (the hubs) but was blind to community boundaries. The ERGM and the standard blockmodel do the
 opposite: they capture sectoral boundaries and measure intra- versus inter-group
 attraction, but they treat all products within a block as stochastically equivalent,
 abstracting away the very degree heterogeneity that Barabási–Albert reproduced.
